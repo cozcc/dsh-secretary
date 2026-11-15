@@ -139,6 +139,11 @@ const ctx = {
 mod.apply(ctx);
 
 // jsdom 没有布局引擎，这里按内联样式伪造矩形，好验证拖拽换算
+// jsdom 没有布局：给 clientWidth 一个固定值，模拟 1200px 宽的可见区域
+Object.defineProperty(dom.window.Element.prototype, 'clientWidth', {
+  get() { return 1200; }, configurable: true,
+});
+
 dom.window.Element.prototype.getBoundingClientRect = function () {
   const left = parseFloat(this.style?.left) || 0;
   const top = parseFloat(this.style?.top) || 0;
@@ -161,7 +166,7 @@ let pass = 0; let fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('✔', name); } else { fail++; console.log('✖', name, extra); } };
 
 check('首屏渲染出两张便签', text().includes('写周报') && text().includes('回邮件'));
-check('统计正确（共2 / 没做完1 / 已完成1）', text().includes('共 2') && text().includes('没做完 1') && text().includes('已完成 1'), text().slice(0, 120));
+check('统计正确（便签2 / 没做完1 / 已完成1）', text().includes('便签 2') && text().includes('没做完 1') && text().includes('已完成 1'), text().slice(0, 120));
 
 // 勾完成
 await act(async () => { byTitle('做完，勾掉').click(); await new Promise((r) => setTimeout(r, 30)); });
@@ -268,7 +273,7 @@ console.log('排布：', notes.map((n) => `${n.text}@${n.x},${n.y}`).join(' | ')
 
 
 // ── 自动排列：铺满一行自动换行 ──────────────────────────
-const COLS = 9;
+const COLS = 4; // 可见宽度 1200 - 2*40 margin，248 宽 + 16 间距 → 每行 4 张
 const STEP_X = 248 + 16;
 const STEP_Y = 200 + 16; // 与 client.mjs 的 NOTE_H 保持一致
 const M = 40;
@@ -287,7 +292,12 @@ const want = notes.map((_, i) => slot(i)).map((p) => `${p.x},${p.y}`).sort();
 const got = notes.map((n) => `${n.x},${n.y}`).sort();
 check('自动排列：全部落到网格位并换行', JSON.stringify(want) === JSON.stringify(got), `want=${want.join(' ')} got=${got.join(' ')}`);
 const row1 = notes.filter((n) => n.y === M).length;
-check('自动排列：一行最多 9 张，其余换到第二行', row1 === Math.min(notes.length, COLS) && notes.filter((n) => n.y === M + STEP_Y).length === Math.max(0, notes.length - COLS), `row1=${row1} total=${notes.length}`);
+const newest = [...notes].filter((n) => n.kind !== 'brief').sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))[0];
+check('最新的便签在最左上', newest && newest.x === 40 && newest.y === 40, newest ? `x=${newest.x} y=${newest.y}` : '无');
+const rowBuckets = new Map();
+for (const n of notes) rowBuckets.set(n.y, (rowBuckets.get(n.y) || 0) + 1);
+const perRow = [...rowBuckets.values()];
+check('自动排列：每行最多 4 张并逐行往下', perRow.length > 1 && Math.max(...perRow) <= COLS, `每行 ${perRow.join('/')}（共 ${notes.length} 张）`);
 
 
 // ── 会话导入卡片：待办清单和来源要能渲染出来 ──────────────
@@ -315,10 +325,23 @@ check('清单状态标记（✓/◐/○）', host.textContent.includes('✓') &&
 // ── 助理简报：生成按钮、简报卡渲染、设置面板 ──────────────
 const statsBefore = stats();
 await act(async () => { byText('生成简报').click(); await new Promise((r) => setTimeout(r, 120)); });
-check('生成简报：画布出现简报卡', text().includes('助理简报'), text().slice(-200));
-check('简报卡渲染分块标题', text().includes('过去 24 小时') && text().includes('需要你出手'));
-check('简报卡渲染条目与语气', text().includes('卡住的会话') && text().includes('5 天没动'));
+check('生成简报：自动切到简报页', text().includes('助理简报') && text().includes('重新生成'), text().slice(0, 160));
+check('简报页渲染分块标题', text().includes('过去 24 小时') && text().includes('需要你出手'));
+check('简报页渲染条目与语气', text().includes('卡住的会话') && text().includes('5 天没动'));
 check('简报卡不参与待办计数', stats().total === statsBefore.total && stats().done === statsBefore.done);
+
+// 便签 / 简报 是两个页面
+const tabBtns = [...host.querySelectorAll('button')].filter((b) => {
+  const t = (b.textContent || '').trim();
+  return t.startsWith('便签') || t === '简报';
+});
+check('顶栏有两个页面标签', tabBtns.length === 2, tabBtns.map((b) => b.textContent).join(' | '));
+const notesTab = tabBtns.find((b) => (b.textContent || '').startsWith('便签'));
+await act(async () => { notesTab.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
+const notesPane = () => host.querySelector('[data-page="notes"]');
+const briefPane = () => host.querySelector('[data-page="brief"]');
+check('切回便签页：便签可见、简报页已卸下', !!notesPane() && (notesPane().getAttribute('style') || '').indexOf('display: none') === -1 && !briefPane());
+check('便签页不再渲染简报卡', ![...host.querySelectorAll('div[data-note-id]')].some((el) => el.textContent.includes('需要你出手')));
 
 // 设置面板
 await act(async () => { byText('设置').click(); await new Promise((r) => setTimeout(r, 60)); });
@@ -371,7 +394,9 @@ check('点击后跳转到对应会话', opened.includes('sess-1'), `opened=${JSO
 const srcBtn = [...host.querySelectorAll('button[title^="打开对应线程"]')].find((b) => b.textContent.includes('Playground'));
 check('来源标记也能跳转', !!srcBtn);
 
-// 简报卡里的条目也能跳
+// 简报页里的条目也能跳（先切到简报页）
+const briefTabBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '简报');
+if (briefTabBtn) await act(async () => { briefTabBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 100)); });
 const briefLink = [...host.querySelectorAll('button[title^="打开对应线程"]')].find((b) => b.textContent.includes('卡住的会话'));
 check('简报条目渲染成链接', !!briefLink);
 if (briefLink) {
@@ -381,6 +406,9 @@ if (briefLink) {
 
 
 // ── 导入会话卡后自动按真实高度排开，不叠 ─────────────?
+// 拉取按钮只在便签页
+const notesTabBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
+if (notesTabBtn) await act(async () => { notesTabBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
 const beforeImport = notes.length;
 await act(async () => { byText('拉取线程任务').click(); await new Promise((r) => setTimeout(r, 260)); });
 check('长任务期间显示进度', text().includes('解析会话日志') && /3\/10/.test(text()), text().slice(0, 120));

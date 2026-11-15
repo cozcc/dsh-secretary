@@ -13,7 +13,8 @@
 - Tick the circle to finish a note (strikethrough + dimmed card); tick again to undo
 - Log progress on unfinished notes; drag cards; drop on the trash can to delete
 - Cards grow with their content — no inner scrollbars
-- Layout is packed by **measured card height**, wrapping at the canvas edge; `自动排列` re-flows everything
+- Layout is packed by **measured card height**; rows wrap at the **visible right edge** (no horizontal scrolling), newest card top-left
+- `自动排列` re-flows everything newest-first: left → right, wrap, then next row
 - Unified Apple-Notes-style palette: white cards on a light canvas, one accent colour, no per-note colours
 
 ### 2. Session cards pulled from DSH threads
