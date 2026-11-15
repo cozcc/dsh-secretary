@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "DSH assistant",
+    "description": "Your DSH assistant: periodically summarizes the goals, progress, todos and token cost of every workspace thread, drops a briefing card onto the canvas, and prices tokens with the official rates."
+  },
+  "panel": {
+    "title": "DSH assistant"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "dsh-secretary",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Your DSH secretary: a sticky-note canvas plus scheduled briefings that summarize every thread's goal, progress, todos and token cost.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib",
+    "src",
+    "locale",
+    "icon.svg",
+    "cordis.patch.yml",
+    "build-client.mjs"
+  ],
+  "license": "MIT",
+  "dsh": {
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "platform": "web"
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "node build-client.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "author": "cozcc",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cozcc/dsh-secretary.git"
+  },
+  "homepage": "https://github.com/cozcc/dsh-secretary#readme",
+  "bugs": {
+    "url": "https://github.com/cozcc/dsh-secretary/issues"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "kanban",
+    "sticky-notes",
+    "assistant",
+    "secretary",
+    "briefing",
+    "token-cost"
+  ]
+}

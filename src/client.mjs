@@ -1,0 +1,1787 @@
+/**
+ * DSH 助理 —— 浏览器端。
+ *
+ * 侧边栏挂一个图标，点开整页就是画布：一张无限大的浅色底，上面铺着便签。
+ *   · 双击空白处新建便签
+ *   · 便签左上角复选框勾一下就算做完（卡片变淡、划线）
+ *   · 没做完的可以在便签里补「进展」
+ *   · 拖动便签移动，拖到右下角垃圾桶删除
+ *
+ * 数据走宿主挂的同源路由 /workbench/api/*（见 src/http.mjs）。
+ * 写操作带 X-Workbench-Token，令牌由宿主注入页面。
+ *
+ * 约束：浏览器半区没有 JSX 编译，用 React.createElement 手写；样式用内联对象。
+ */
+
+const NS = 'secretary';
+const PANEL_ID = 'secretary';
+const API = '/workbench/api';
+
+/**
+ * 客户端插件的服务依赖声明：cordis 只把声明过的服务挂到 ctx 上。
+ * 少了这一行，apply 里的 ctx.slots 不是服务对象，会抛 TypeError，
+ * 整个条目状态变 failed —— 而 DSH 的 web boot 会因此终止启动。
+ */
+const inject = ['slots'];
+
+const runtime = { React: null };
+/** 画布组件的回调出口：便签子组件通过它把最新看板推回画布。 */
+const boardSink = { fn: null };
+
+const NOTE_W = 248;
+/** 排布避让用的估算高度（实际卡片会随进展条数变高，这里取一个偏大的值）。 */
+const NOTE_H = 200;
+/** 新便签之间、以及和已有便签之间留的空隙。 */
+const NOTE_GAP = 16;
+
+/** 画布基准尺寸与页边距；纵向不够时会自动加高。 */
+const CANVAS_W = 2600;
+const CANVAS_H = 1800;
+const MARGIN = 40;
+/**
+ * 统一配色（参考苹果备忘录）：不再有六色便签。
+ * 卡片一律是「浅色面板 + 发丝线 + 极轻投影」，强调色只有品牌色一种，
+ * 状态色只用来标"需要你出手 / 失败"，不参与装饰。
+ */
+const ACCENT = 'var(--dsw-alias-brand-primary, #0a84ff)';
+const HAIRLINE = 'var(--dsw-alias-border-l1, rgba(60,60,67,.12))';
+const TEXT_1 = 'var(--dsw-alias-label-primary, #1c1c1e)';
+const TEXT_2 = 'var(--dsw-alias-label-secondary, #6e6e73)';
+const CARD = 'var(--dsw-alias-bg-layer-1, #ffffff)';
+const INSET = 'var(--dsw-alias-bg-layer-2, #f2f2f7)';
+
+const S = {
+  /* 容器：一整页浅灰底，像备忘录的列表背景 */
+  root: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
+    color: TEXT_1,
+    background: 'var(--dsw-alias-bg-base, #f2f2f7)',
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', system-ui, sans-serif",
+    WebkitFontSmoothing: 'antialiased',
+  },
+
+  /* 顶栏：细线分隔 + 极简按钮，参考备忘录工具栏 */
+  topbar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '0 16px',
+    height: '44px',
+    flex: 'none',
+    boxSizing: 'border-box',
+    background: 'var(--dsw-alias-bg-layer-1, #fff)',
+    borderBottom: `0.5px solid ${HAIRLINE}`,
+  },
+  title: { fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' },
+  chip: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    height: '22px',
+    padding: '0 8px',
+    borderRadius: '6px',
+    fontSize: '11px',
+    fontVariantNumeric: 'tabular-nums',
+    whiteSpace: 'nowrap',
+    background: INSET,
+    color: TEXT_2,
+  },
+  spacer: { flex: '1' },
+  hint: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+
+  canvasWrap: { position: 'relative', flex: '1', minHeight: 0, overflow: 'hidden' },
+  canvasScroll: { position: 'absolute', inset: 0, overflow: 'auto', outline: 'none' },
+  /* 画布：干净的浅灰，不再铺彩色点阵 */
+  canvas: {
+    position: 'relative',
+    background: 'transparent',
+  },
+
+  /* 便签卡：白底、10px 圆角、发丝线、轻投影 */
+  note: {
+    position: 'absolute',
+    boxSizing: 'border-box',
+    padding: '12px 14px 10px',
+    borderRadius: '12px',
+    background: CARD,
+    border: `0.5px solid ${HAIRLINE}`,
+    boxShadow: '0 1px 2px rgba(0,0,0,.06), 0 6px 18px rgba(0,0,0,.05)',
+    userSelect: 'none',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    overflow: 'hidden', // 只裁圆角，不设高度上限：内容多高卡片就多高
+    transition: 'box-shadow .15s, opacity .2s',
+  },
+  noteDragging: {
+    boxShadow: '0 10px 28px rgba(0,0,0,.18)',
+    zIndex: 50,
+    cursor: 'grabbing',
+  },
+  // 已完成的卡不再整体透明（叠在一起会像一层半透明纸），改成浅底 + 灰字
+  noteDone: {
+    background: 'var(--dsw-alias-bg-layer-2, #f2f2f7)',
+    boxShadow: 'none',
+    borderColor: 'transparent',
+  },
+
+  /* 复选：备忘录/提醒事项那种圆角方框，勾上变品牌色 */
+  noteHead: { display: 'flex', alignItems: 'flex-start', gap: '9px' },
+  checkbox: {
+    flex: 'none',
+    width: '18px',
+    height: '18px',
+    marginTop: '1px',
+    borderRadius: '50%',
+    border: `1.5px solid var(--dsw-alias-border-l2, rgba(60,60,67,.3))`,
+    background: 'transparent',
+    cursor: 'pointer',
+    padding: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#fff',
+    transition: 'background .15s, border-color .15s',
+  },
+  checkboxOn: { background: ACCENT, borderColor: ACCENT },
+
+  noteText: {
+    flex: '1',
+    minWidth: 0,
+    fontSize: '13px',
+    lineHeight: '19px',
+    letterSpacing: '-0.01em',
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    color: TEXT_1,
+    cursor: 'text',
+  },
+  noteTextDone: { textDecoration: 'line-through', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+  noteTextInput: {
+    flex: '1',
+    minWidth: 0,
+    fontSize: '13px',
+    lineHeight: '19px',
+    fontFamily: 'inherit',
+    color: TEXT_1,
+    background: INSET,
+    border: `0.5px solid ${HAIRLINE}`,
+    borderRadius: '7px',
+    padding: '6px 8px',
+    outline: 'none',
+    resize: 'none',
+    minHeight: '64px',
+  },
+
+  /* 底部：只留最必要的操作，发丝线分隔 */
+  noteFoot: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
+    borderTop: `0.5px solid ${HAIRLINE}`,
+    paddingTop: '6px',
+    fontSize: '11px',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+  },
+  footBtn: {
+    border: '0',
+    background: 'transparent',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+    cursor: 'pointer',
+    fontSize: '11px',
+    padding: '2px 5px',
+    borderRadius: '5px',
+    lineHeight: '16px',
+    fontFamily: 'inherit',
+  },
+
+  /* 待办清单（会话导入） */
+  todos: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    borderTop: `0.5px solid ${HAIRLINE}`,
+    paddingTop: '6px',
+  },
+  todoRow: { display: 'flex', gap: '6px', alignItems: 'flex-start', fontSize: '11.5px', lineHeight: '16px', color: TEXT_2 },
+  todoMark: { flex: 'none', width: '11px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' },
+  todoDone: { textDecoration: 'line-through', opacity: 0.55 },
+  todoLink: {
+    flex: '1', minWidth: 0, textAlign: 'left', padding: 0, margin: 0,
+    border: '0', background: 'transparent', font: 'inherit', cursor: 'pointer',
+    color: ACCENT, textDecoration: 'none',
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  actionBtn: {
+    border: `0.5px solid ${HAIRLINE}`, background: 'transparent', color: TEXT_2,
+    cursor: 'pointer', fontSize: '10.5px', lineHeight: '16px', padding: '1px 7px',
+    borderRadius: '999px', fontFamily: 'inherit', whiteSpace: 'nowrap',
+  },
+  actionBtnPrimary: { color: ACCENT, borderColor: ACCENT },
+  actionBtnDanger: { color: 'var(--dsw-alias-state-error-primary, #ff3b30)', borderColor: 'var(--dsw-alias-state-error-primary, #ff3b30)' },
+  reviewBadge: {
+    display: 'inline-flex', alignItems: 'center', gap: '3px',
+    fontSize: '10px', padding: '1px 6px', borderRadius: '999px',
+    background: 'color-mix(in srgb, var(--dsw-alias-state-success-primary, #34c759) 16%, transparent)',
+    color: 'var(--dsw-alias-state-success-primary, #34c759)',
+    cursor: 'pointer',
+  },
+  cancelledBadge: {
+    fontSize: '10px', padding: '1px 6px', borderRadius: '999px',
+    background: INSET, color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+  },
+  sourceLink: {
+    fontSize: '10.5px', padding: 0, margin: 0, border: '0', background: 'transparent',
+    font: 'inherit', cursor: 'pointer', color: ACCENT,
+    maxWidth: '150px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  },
+  todoDoing: { fontWeight: 600, color: TEXT_1 },
+
+  /* 进展记录 */
+  updates: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  updateLine: { display: 'flex', gap: '6px', fontSize: '11px', lineHeight: '16px', color: TEXT_2 },
+  updateDot: { flex: 'none', width: '3px', height: '3px', borderRadius: '50%', background: 'var(--dsw-alias-border-l2, #c7c7cc)', marginTop: '6px' },
+  updateText: { flex: '1', minWidth: 0, wordBreak: 'break-word' },
+  updateInput: {
+    width: '100%',
+    boxSizing: 'border-box',
+    fontSize: '11.5px',
+    fontFamily: 'inherit',
+    color: TEXT_1,
+    background: INSET,
+    border: `0.5px solid ${HAIRLINE}`,
+    borderRadius: '7px',
+    padding: '5px 8px',
+    outline: 'none',
+  },
+
+  /* 来源标记 */
+  sourceLine: {
+    fontSize: '10.5px',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    maxWidth: '150px',
+  },
+
+  /* 空状态 */
+  empty: {
+    position: 'absolute',
+    left: '50%',
+    top: '44%',
+    transform: 'translate(-50%, -50%)',
+    textAlign: 'center',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+    fontSize: '12.5px',
+    lineHeight: '22px',
+    pointerEvents: 'none',
+  },
+  emptyTitle: { fontSize: '15px', fontWeight: 600, color: TEXT_2, marginBottom: '4px', letterSpacing: '-0.01em' },
+
+  /* 右下角新建 */
+  fab: {
+    position: 'absolute',
+    right: '20px',
+    bottom: '20px',
+    width: '46px',
+    height: '46px',
+    borderRadius: '23px',
+    border: '0',
+    background: ACCENT,
+    color: '#fff',
+    fontSize: '24px',
+    lineHeight: '43px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 16px rgba(0,0,0,.18)',
+    zIndex: 20,
+  },
+  trash: {
+    position: 'absolute',
+    right: '20px',
+    bottom: '20px',
+    width: '46px',
+    height: '46px',
+    borderRadius: '23px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    border: `1.5px dashed var(--dsw-alias-border-l2, rgba(60,60,67,.3))`,
+    background: CARD,
+    zIndex: 21,
+    transition: 'transform .12s, background .12s',
+  },
+  trashHot: {
+    background: 'var(--dsw-alias-state-error-primary, #ff3b30)',
+    borderColor: 'var(--dsw-alias-state-error-primary, #ff3b30)',
+    transform: 'scale(1.08)',
+  },
+
+  error: {
+    position: 'absolute',
+    left: '50%',
+    top: '12px',
+    transform: 'translateX(-50%)',
+    padding: '6px 12px',
+    borderRadius: '8px',
+    background: 'var(--dsw-alias-bg-overlay, #fff)',
+    color: 'var(--dsw-alias-state-error-primary, #ff3b30)',
+    fontSize: '11.5px',
+    boxShadow: '0 4px 14px rgba(0,0,0,.12)',
+    zIndex: 30,
+  },
+  loading: {
+    position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)', fontSize: '12.5px',
+  },
+
+  /* 出错兜底 */
+  crash: {
+    height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+    gap: '10px', padding: '24px', boxSizing: 'border-box', textAlign: 'center',
+    color: TEXT_1, background: 'var(--dsw-alias-bg-base, #f2f2f7)',
+  },
+  crashTitle: { fontSize: '14px', fontWeight: 600 },
+  crashMsg: {
+    fontSize: '12px', lineHeight: '18px', maxWidth: '520px', wordBreak: 'break-word',
+    color: TEXT_2, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  },
+  crashBtn: {
+    height: '30px', padding: '0 14px', borderRadius: '8px', cursor: 'pointer', fontSize: '12px',
+    border: `0.5px solid ${HAIRLINE}`, background: CARD, color: TEXT_1, fontFamily: 'inherit',
+  },
+
+  /* 简报卡：同一种卡片语言，靠层次区分，不用彩色描边 */
+  brief: {
+    position: 'absolute', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '10px',
+    padding: '14px 16px 14px', borderRadius: '14px',
+    background: CARD,
+    border: `0.5px solid ${HAIRLINE}`,
+    boxShadow: '0 1px 2px rgba(0,0,0,.06), 0 8px 22px rgba(0,0,0,.06)',
+    color: TEXT_1,
+    cursor: 'grab', userSelect: 'none',
+  },
+  briefHead: { display: 'flex', alignItems: 'baseline', gap: '8px' },
+  briefTitle: { fontSize: '14px', fontWeight: 700, letterSpacing: '-0.01em' },
+  briefMeta: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+  briefScroll: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  briefSection: { display: 'flex', flexDirection: 'column', gap: '3px', padding: '9px 0', borderTop: `0.5px solid ${HAIRLINE}` },
+  briefSectionTitle: {
+    fontSize: '11px', fontWeight: 600, letterSpacing: '0',
+    color: 'var(--dsw-alias-label-secondary, #8e8e93)',
+  },
+  briefLine: { fontSize: '12.5px', lineHeight: '18px', wordBreak: 'break-word' },
+  briefItem: {
+    display: 'flex', flexDirection: 'column', gap: '1px',
+    padding: '4px 0 4px 9px', borderLeft: `2px solid var(--dsw-alias-border-l2, rgba(60,60,67,.18))`,
+    marginTop: '3px',
+  },
+  briefItemTitle: { fontSize: '12.5px', fontWeight: 600, lineHeight: '18px' },
+  briefItemLink: {
+    padding: 0, margin: 0, border: '0', background: 'transparent', font: 'inherit',
+    fontSize: '12.5px', fontWeight: 600, lineHeight: '18px', textAlign: 'left',
+    color: ACCENT, cursor: 'pointer',
+  },
+  briefItemLine: { fontSize: '11.5px', lineHeight: '16px', color: TEXT_2 },
+
+  /* 设置面板：像系统弹层 */
+  settingsPanel: {
+    position: 'absolute', right: '16px', top: '52px', zIndex: 60, width: '280px',
+    display: 'flex', flexDirection: 'column', gap: '12px', padding: '14px 16px',
+    borderRadius: '12px', background: 'var(--dsw-alias-bg-overlay, #fff)',
+    border: `0.5px solid ${HAIRLINE}`,
+    boxShadow: '0 12px 40px rgba(0,0,0,.18)', fontSize: '12px',
+    fontFamily: 'inherit',
+  },
+  settingsRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' },
+  settingsLabel: { color: TEXT_2, fontSize: '12px' },
+  settingsInput: {
+    width: '112px', height: '26px', padding: '0 8px', boxSizing: 'border-box',
+    borderRadius: '7px', border: `0.5px solid ${HAIRLINE}`,
+    background: INSET, color: TEXT_1, fontSize: '12px', fontFamily: 'inherit',
+  },
+  settingsHint: { fontSize: '11px', lineHeight: '16px', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+
+  progress: {
+    position: 'absolute', left: '50%', top: '14px', transform: 'translateX(-50%)',
+    display: 'flex', flexDirection: 'column', gap: '5px', minWidth: '260px',
+    padding: '8px 14px', borderRadius: '10px', zIndex: 45,
+    background: 'var(--dsw-alias-bg-overlay, #fff)', color: TEXT_1,
+    border: `0.5px solid ${HAIRLINE}`, boxShadow: '0 8px 26px rgba(0,0,0,.16)',
+    fontSize: '11.5px',
+  },
+  progressRow: { display: 'flex', alignItems: 'center', gap: '8px' },
+  progressTrack: {
+    height: '3px', borderRadius: '2px', overflow: 'hidden',
+    background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.16))',
+  },
+  progressFill: {
+    height: '100%', background: ACCENT, borderRadius: '2px',
+    transition: 'width .2s ease-out',
+  },
+  spinner: {
+    width: '10px', height: '10px', borderRadius: '50%', flex: 'none',
+    border: `1.5px solid ${HAIRLINE}`, borderTopColor: ACCENT,
+    animation: 'wb-spin .8s linear infinite',
+  },
+  draftModal: {
+    position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', zIndex: 70,
+    width: '460px', maxWidth: '86%', display: 'flex', flexDirection: 'column', gap: '10px',
+    padding: '14px 16px', borderRadius: '12px', background: 'var(--dsw-alias-bg-overlay, #fff)',
+    border: `0.5px solid ${HAIRLINE}`, boxShadow: '0 16px 48px rgba(0,0,0,.22)', color: TEXT_1,
+  },
+  draftArea: {
+    width: '100%', height: '220px', resize: 'vertical', boxSizing: 'border-box',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '11.5px', lineHeight: '17px',
+    padding: '8px 10px', borderRadius: '8px', border: `0.5px solid ${HAIRLINE}`,
+    background: INSET, color: TEXT_1, outline: 'none',
+  },
+  toast: {
+    position: 'absolute', left: '50%', bottom: '26px', transform: 'translateX(-50%)',
+    padding: '8px 14px', borderRadius: '10px', zIndex: 40,
+    background: 'var(--dsw-alias-bg-overlay, #fff)', color: TEXT_1,
+    boxShadow: '0 8px 26px rgba(0,0,0,.16)', fontSize: '12px', whiteSpace: 'nowrap',
+    border: `0.5px solid ${HAIRLINE}`,
+  },
+};
+
+/* ── API ───────────────────────────────────────────────── */
+
+function createApi() {
+  const token = (typeof globalThis !== 'undefined' && globalThis.__WORKBENCH_TOKEN__) || '';
+
+  async function req(path, body) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['X-Workbench-Token'] = token;
+    const res = await fetch(`${API}${path}`, body === undefined
+      ? { method: 'GET', headers, cache: 'no-store' }
+      : { method: 'POST', headers, body: JSON.stringify(body) });
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { error: text }; }
+    if (!res.ok) throw new Error(data?.error ?? `HTTP ${res.status}`);
+    return data;
+  }
+
+  return {
+    get: () => req('/board'),
+    importSessions: () => req('/import', {}),
+    refreshSession: (sessionId) => req('/import', { sessionIds: [sessionId] }),
+    sessions: () => req('/sessions'),
+    generateBrief: (sinceHours) => req('/brief', { sinceHours: sinceHours || 24 }),
+    getSettings: () => req('/settings'),
+    getCumulative: () => req('/cumulative'),
+    layout: (positions) => req('/layout', { positions }),
+    progress: () => req('/progress'),
+    saveSettings: (patch) => req('/settings', patch),
+    addNote: (input) => req('/note', input),
+    updateNote: (input) => req('/note/update', input),
+    setDone: (id, done) => req('/note/done', { id, done }),
+    deleteNote: (id) => req('/note/delete', { id }),
+    addProgress: (id, text) => req('/note/update-log', { id, text }),
+    deleteProgress: (id, updateId) => req('/note/update-log', { id, updateId, delete: true }),
+  };
+}
+
+/** 简报里每种语气对应的颜色。 */
+const TONE = {
+  strong: { fontWeight: 600 },
+  ok: { color: 'var(--dsw-alias-state-success-primary, #34c759)' },
+  warn: { color: 'var(--dsw-alias-state-warn-primary, #ff9f0a)' },
+  bad: { color: 'var(--dsw-alias-state-error-primary, #ff3b30)' },
+  muted: { color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+  normal: {},
+};
+
+/* ── 工具 ──────────────────────────────────────────────── */
+
+/** token 缩写：12.3k / 1.24M */
+function fmtTokens(n) {
+  const v = Number(n) || 0;
+  if (v >= 1_000_000_000) return `${(v / 1_000_000_000).toFixed(2)}B`;
+  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
+  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}k`;
+  return String(Math.round(v));
+}
+
+/** 金额：小额保留更多位数，避免显示成 $0.00 */
+function fmtUsd(usd) {
+  const v = Number(usd) || 0;
+  if (v === 0) return '$0';
+  if (v < 0.01) return `$${v.toFixed(4)}`;
+  if (v < 1) return `$${v.toFixed(3)}`;
+  return `$${v.toFixed(2)}`;
+}
+
+function fmtTime(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return sameDay ? `${hh}:${mm}` : `${d.getMonth() + 1}/${d.getDate()}`;
+}
+
+/* ── 复选框对勾图标 ───────────────────────────────────── */
+
+function checkSvg(React, size = 11) {
+  return React.createElement('svg', {
+    width: size, height: size, viewBox: '0 0 12 12', fill: 'none', 'aria-hidden': 'true',
+  }, React.createElement('path', {
+    d: 'M2 6.2 4.6 8.8 10 3.2',
+    stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round',
+  }));
+}
+
+function trashSvg(React, color) {
+  return React.createElement('svg', {
+    width: 18, height: 18, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true',
+  },
+  React.createElement('path', {
+    d: 'M3 4.5h10M6.3 4.5V3.2h3.4v1.3M4.4 4.5l.6 8.2h6l.6-8.2M6.6 7v3.4M9.4 7v3.4',
+    stroke: color, strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round',
+  }));
+}
+
+/** 侧边栏小图标：一张贴了便签的板。 */
+function makeIcon(React) {
+  const h = React.createElement;
+  return function WorkbenchIcon({ size = 16 }) {
+    return h('svg', {
+      width: size, height: size, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true',
+    },
+    h('rect', { x: 1.8, y: 2.6, width: 12.4, height: 10.8, rx: 2, stroke: 'currentColor', strokeWidth: 1.3 }),
+    h('rect', { x: 4, y: 5, width: 3.4, height: 3.4, rx: 0.8, fill: 'currentColor', opacity: 0.75 }),
+    h('rect', { x: 8.6, y: 5, width: 3.4, height: 3.4, rx: 0.8, fill: 'currentColor', opacity: 0.45 }),
+    h('path', { d: 'M4 10.9h7.9', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', opacity: 0.6 }));
+  };
+}
+
+/* ── 单张便签 ──────────────────────────────────────────── */
+
+function makeNote(React, api, onBoard) {
+  const h = React.createElement;
+
+  return function Note({ note, drag, onDragStart, onDelete, dragHot, autoEdit, onOpenSession, onRefresh, onCancel, onContinue }) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(note.text);
+    const [addingProgress, setAddingProgress] = React.useState(false);
+    const [progressDraft, setProgressDraft] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const [hover, setHover] = React.useState(false);
+
+    const run = React.useCallback(async (fn) => {
+      setBusy(true);
+      try {
+        const data = await fn();
+        if (data?.board) onBoard(data);
+      } finally {
+        setBusy(false);
+      }
+    }, [onBoard]);
+
+    const dragging = drag?.id === note.id;
+
+    // 刚新建的便签直接进编辑态，省一次双击
+    React.useEffect(() => {
+      if (!autoEdit) return;
+      setDraft(note.text === '新便签' ? '' : note.text);
+      setEditing(true);
+    }, [autoEdit]);
+
+    const toggleDone = (e) => {
+      e.stopPropagation();
+      if (busy) return;
+      run(() => api.setDone(note.id, !note.done));
+    };
+
+    const saveText = () => {
+      const text = draft.trim();
+      setEditing(false);
+      if (!text) {
+        // 新建后啥也没写就点走：别留一张叫“新便签”的空卡，直接丢掉
+        if (autoEdit) { run(() => api.deleteNote(note.id)); return; }
+        setDraft(note.text);
+        return;
+      }
+      if (text === note.text) { setDraft(note.text); return; }
+      run(() => api.updateNote({ id: note.id, text }));
+    };
+
+    const submitProgress = () => {
+      const text = progressDraft.trim();
+      if (!text) { setAddingProgress(false); return; }
+      setProgressDraft('');
+      setAddingProgress(false);
+      run(() => api.addProgress(note.id, text));
+    };
+
+    const onPointerDown = (e) => {
+      if (e.button !== 0) return;
+      if (editing || addingProgress) return;
+      const target = e.target;
+      if (target && (target.closest?.('button') || target.closest?.('textarea') || target.closest?.('input'))) return;
+      onDragStart(e, note.id);
+    };
+
+    const lastUpdate = note.updates[note.updates.length - 1];
+
+    const pos = dragging ? { x: drag.x, y: drag.y } : { x: note.x, y: note.y };
+
+    return h('div', {
+      'data-note-id': note.id,
+      style: {
+        ...S.note,
+        left: `${pos.x}px`,
+        top: `${pos.y}px`,
+        width: `${NOTE_W}px`,
+        minHeight: '96px',
+        ...(dragging ? S.noteDragging : {}),
+        ...(note.done || note.cancelled ? S.noteDone : {}),
+        ...(note.cancelled ? { opacity: 0.75 } : {}),
+        ...(dragHot && dragging ? { outline: '2px solid var(--dsw-alias-state-error-primary, #ff3b30)' } : {}),
+      },
+      onPointerDown,
+      onMouseEnter: () => setHover(true),
+      onMouseLeave: () => setHover(false),
+    },
+    (note.review && !note.done && !note.cancelled)
+      ? h('button', {
+        type: 'button',
+        style: { ...S.reviewBadge, alignSelf: 'flex-start' },
+        title: '这个线程刚跑完一轮，点一下标记验收完成',
+        onPointerDown: (e) => e.stopPropagation(),
+        onClick: (e) => { e.stopPropagation(); run(() => api.setDone(note.id, true)); },
+      }, '● 待验收')
+      : null,
+    h('div', { style: S.noteHead },
+      h('button', {
+        type: 'button',
+        style: { ...S.checkbox, ...(note.done ? S.checkboxOn : {}) },
+        title: note.done ? '取消完成' : '做完，勾掉',
+        'aria-label': note.done ? '取消完成' : '标记为完成',
+        disabled: busy,
+        onClick: toggleDone,
+      }, note.done && !note.cancelled ? checkSvg(React) : null),
+      editing
+        ? h('textarea', {
+          style: S.noteTextInput,
+          value: draft,
+          autoFocus: true,
+          onChange: (e) => setDraft(e.target.value),
+          onBlur: saveText,
+          onKeyDown: (e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') { setDraft(note.text); setEditing(false); }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveText(); }
+          },
+        })
+        : h('div', {
+          style: { ...S.noteText, ...(note.done ? S.noteTextDone : {}) },
+          role: 'textbox',
+          tabIndex: 0,
+          title: '双击改内容 · 按住拖动整张卡',
+          onDoubleClick: () => { setDraft(note.text); setEditing(true); },
+          onKeyDown: (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); setDraft(note.text); setEditing(true); }
+          },
+        }, note.text)),
+
+    (note.todos ?? []).length
+      ? h('div', { style: S.todos },
+        note.todos.slice(0, 4).map((t, i) => {
+          const openable = Boolean(note.source?.id) && t.status !== 'completed';
+          const done = t.status === 'completed';
+          const label = h('span', {
+            style: {
+              flex: '1', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              ...(done ? S.todoDone : {}),
+              ...(t.status === 'in_progress' ? S.todoDoing : {}),
+            },
+          }, t.content);
+          return h('div', { key: `${note.id}-t${i}`, style: S.todoRow },
+            h('span', { style: S.todoMark }, done ? '✓' : t.status === 'in_progress' ? '◐' : '○'),
+            openable
+              ? h('button', {
+                type: 'button',
+                style: S.todoLink,
+                title: `打开对应线程：${note.source?.title ?? ''}`,
+                onPointerDown: (e) => e.stopPropagation(),
+                onClick: (e) => { e.stopPropagation(); onOpenSession?.(note.source.id); },
+              }, label)
+              : label);
+        }),
+        note.todos.length > 4 ? h('div', { style: { ...S.todoRow, opacity: 0.7 } }, h('span', { style: S.todoMark }), h('span', null, `还有 ${note.todos.length - 4} 条…`)) : null)
+      : null,
+
+    note.updates.length
+      ? h('div', { style: S.updates },
+        note.updates.slice(-4).map((u) => h('div', { key: u.id, style: S.updateLine },
+          h('span', { style: S.updateDot }),
+          h('span', { style: S.updateText },
+            h('span', { style: { opacity: 0.65, marginRight: '4px' } }, fmtTime(u.at)),
+            u.text))))
+      : null,
+
+    addingProgress
+      ? h('input', {
+        style: S.updateInput,
+        value: progressDraft,
+        autoFocus: true,
+        placeholder: '记一笔进展，回车保存',
+        onChange: (e) => setProgressDraft(e.target.value),
+        onBlur: submitProgress,
+        onKeyDown: (e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') { e.preventDefault(); submitProgress(); }
+          if (e.key === 'Escape') { setProgressDraft(''); setAddingProgress(false); }
+        },
+        onPointerDown: (e) => e.stopPropagation(),
+      })
+      : null,
+
+    h('div', { style: S.noteFoot, onPointerDown: (e) => e.stopPropagation() },
+      h('button', {
+        type: 'button',
+        style: S.footBtn,
+        title: '追加一条进展',
+        disabled: busy,
+        onClick: () => setAddingProgress(true),
+      }, note.updates.length ? '＋ 进展' : '＋ 记进展'),
+      h('span', { style: S.spacer }),
+      (note.source
+        ? h('button', {
+          type: 'button',
+          style: S.sourceLink,
+          title: `打开对应线程：${note.source.title}${note.source.workspace ? ` · ${note.source.workspace}` : ''}`,
+          onPointerDown: (e) => e.stopPropagation(),
+          onClick: (e) => { e.stopPropagation(); onOpenSession?.(note.source.id); },
+        }, `${note.source.workspace || note.source.title}`)
+        : h('span', { style: { opacity: 0.85 } }, note.done ? `完成于 ${fmtTime(note.doneAt)}` : (lastUpdate ? '' : `建于 ${fmtTime(note.createdAt)}`))),
+      note.source
+        ? (note.cancelled
+          ? h('button', {
+            type: 'button',
+            style: S.actionBtn,
+            title: '把这个任务恢复到看板',
+            onPointerDown: (e) => e.stopPropagation(),
+            onClick: (e) => { e.stopPropagation(); onCancel?.(note, false); },
+          }, '恢复')
+          : h('span', { style: { display: 'flex', gap: '4px' }, onPointerDown: (e) => e.stopPropagation() },
+            h('button', {
+              type: 'button',
+              style: { ...S.actionBtn, ...S.actionBtnPrimary },
+              title: '复制续做草稿（目标/未完成/进展/产出）并打开这个线程',
+              onClick: (e) => { e.stopPropagation(); onContinue?.(note); },
+            }, '继续'),
+            h('button', {
+              type: 'button',
+              style: S.actionBtn,
+              title: '重新拉取这个线程的待办',
+              disabled: busy,
+              onClick: (e) => { e.stopPropagation(); onRefresh?.(note); },
+            }, '刷新'),
+            h('button', {
+              type: 'button',
+              style: { ...S.actionBtn, ...S.actionBtnDanger },
+              title: '放弃这个任务（不计入没做完，以后拉取也不会回来）',
+              disabled: busy,
+              onClick: (e) => { e.stopPropagation(); onCancel?.(note, true); },
+            }, '取消')))
+        : null,
+      h('button', {
+        type: 'button',
+        style: S.footBtn,
+        title: '删除这张便签',
+        disabled: busy,
+        onClick: () => run(() => api.deleteNote(note.id)),
+      }, '×')));
+  };
+}
+
+/* ── 错误边界：面板出错时显示原因，而不是让整页黑掉 ────── */
+
+function makeBoundary(React) {
+  const h = React.createElement;
+  return class Boundary extends React.Component {
+    constructor(props) {
+      super(props);
+      this.state = { error: null };
+    }
+
+    static getDerivedStateFromError(error) {
+      return { error };
+    }
+
+    componentDidCatch(error, info) {
+      // 带上组件栈，方便出问题时定位
+      console.error('[workbench] 面板渲染出错', error, info?.componentStack ?? '');
+    }
+
+    render() {
+      if (this.state.error) {
+        return h('div', { style: S.crash },
+          h('div', { style: S.crashTitle }, 'DSH 助理出错了'),
+          h('div', { style: S.crashMsg }, String(this.state.error?.message ?? this.state.error)),
+          h('button', {
+            type: 'button',
+            style: S.crashBtn,
+            onClick: () => this.setState({ error: null }),
+          }, '重试'));
+      }
+      return this.props.children;
+    }
+  };
+}
+
+/* ── 画布主体 ──────────────────────────────────────────── */
+
+/**
+ * 简报卡：助理生成的那张卡，比便签宽，按块渲染。
+ * 只读——简报是结论，不在这里编辑。
+ */
+function makeBriefCard(React) {
+  const h = React.createElement;
+
+  function renderItem(item, j, openable) {
+    return h('div', { key: `i${j}`, style: S.briefItem },
+      openable
+        ? h('button', {
+          type: 'button',
+          style: S.briefItemLink,
+          title: `打开对应线程：${item.title}`,
+          onPointerDown: (e) => e.stopPropagation(),
+          onClick: (e) => { e.stopPropagation(); openable(item.sessionId); },
+        }, item.title)
+        : h('div', { style: S.briefItemTitle }, item.title),
+      (item.lines ?? []).map((line, k) => h('div', {
+        key: `il${k}`,
+        style: { ...S.briefItemLine, ...(TONE[line.tone] ?? {}) },
+      }, line.text)));
+  }
+
+  function renderSection(section, i, openable) {
+    const titleTone = section.tone === 'warn'
+      ? { color: 'var(--dsw-alias-state-warn-primary, #ff9f0a)' }
+      : section.tone === 'ok'
+        ? { color: 'var(--dsw-alias-state-success-primary, #34c759)' }
+        : {};
+    return h('div', { key: `s${i}`, style: S.briefSection },
+      h('div', { style: { ...S.briefSectionTitle, ...titleTone } }, section.title),
+      (section.lines ?? []).map((line, j) => h('div', {
+        key: `l${j}`,
+        style: { ...S.briefLine, ...(TONE[line.tone] ?? {}) },
+      }, line.text)),
+      (section.items ?? []).map((item, j) => renderItem(item, j, openable)));
+  }
+
+  return function BriefCard({ note, drag, dragHot, onDragStart, onOpenSession }) {
+    const brief = note.brief ?? {};
+    const dragging = Boolean(drag);
+    const pos = dragging ? { x: drag.x, y: drag.y } : { x: note.x, y: note.y };
+    const gen = brief.generatedAt ? fmtTime(brief.generatedAt) : '';
+    const totals = brief.totals;
+
+    return h('div', {
+      'data-note-id': note.id,
+      style: {
+        ...S.brief,
+        left: `${pos.x}px`,
+        top: `${pos.y}px`,
+        width: '360px',
+        ...(dragging ? { zIndex: 50, boxShadow: '0 10px 30px rgba(0,0,0,.22)', cursor: 'grabbing' } : {}),
+        ...(dragHot && dragging ? { outline: '2px solid var(--dsw-alias-state-error-primary, #ff3b30)' } : {}),
+      },
+      onPointerDown: (e) => {
+        if (e.button !== 0) return;
+        const t = e.target;
+        if (t && (t.closest?.('button') || t.closest?.('input') || t.closest?.('textarea'))) return;
+        onDragStart(e, note.id);
+      },
+    },
+    h('div', { style: S.briefHead },
+      h('span', { style: S.briefTitle }, '助理简报'),
+      h('span', { style: S.briefMeta }, brief.date ?? ''),
+      h('span', { style: S.spacer }),
+      h('span', { style: S.briefMeta }, gen ? `生成于 ${gen}` : '')),
+
+    h('div', { style: S.briefScroll }, (brief.sections ?? []).map((section, i) => renderSection(
+      section,
+      i,
+      onOpenSession ? (id) => { if (id) onOpenSession(id); } : null,
+    ))),
+
+    totals
+      ? h('div', { style: S.briefMeta },
+        `${totals.sessions} 个会话 · ${totals.doing ?? 0} 个在推进 · ${totals.done ?? 0} 个完成 · `
+        + `${totals.tokens ? `${totals.tokens.input + totals.tokens.output + (totals.tokens.cached || 0)} tokens` : ''}`)
+      : null);
+  };
+}
+
+function makeWorkspace(React, openSession) {
+  const h = React.createElement;
+  const api = createApi();
+  const Note = makeNote(React, api, (data) => boardSink.fn?.(data));
+  const BriefCard = makeBriefCard(React);
+
+  return function Workspace() {
+    /** 看板对象 { version, notes }；null = 还没加载回来。 */
+    const [board, setBoard] = React.useState(null);
+    const [error, setError] = React.useState('');
+    const [drag, setDrag] = React.useState(null); // { id, dx, dy, x, y }
+    const [dragHot, setDragHot] = React.useState(false);
+    /** 拖拽会话是否在进行：用 ref 值镜像成 state，effect 只依赖它。 */
+    const [dragActive, setDragActive] = React.useState(false);
+    /** 刚新建的便签 id：让那张卡自动进编辑态。 */
+    const [autoEditId, setAutoEditId] = React.useState(null);
+    /** 只看没做完：勾掉的那些先收起来，但仍然计数。 */
+    const [hideDone, setHideDone] = React.useState(false);
+    /** 排布算出来的画布高度（卡片高度不一，靠它撑开）。 */
+    const [layoutH, setLayoutH] = React.useState(0);
+    /** 自动排列进行中（写回期间禁掉按钮，避免连点）。 */
+    const [busyArranging, setBusyArranging] = React.useState(false);
+    /** 拉取会话任务进行中。 */
+    const [busyImporting, setBusyImporting] = React.useState(false);
+    /** 生成简报进行中。 */
+    const [busyBrief, setBusyBrief] = React.useState(false);
+    /** 长期累计（tokens / 费用 / 线程数），不随 90 天快照清理。 */
+    const [cumulative, setCumulative] = React.useState(null);
+    /** 长任务的进度（扫描/解析中显示）。 */
+    const [progress, setProgress] = React.useState(null);
+    /** 剪贴板不可用时的兜底：把草稿显示出来让人手动复制。 */
+    const [draftFallback, setDraftFallback] = React.useState(null);
+    /** 设置面板：打开状态 + 本地编辑中的值。 */
+    const [showSettings, setShowSettings] = React.useState(false);
+    const [settings, setSettings] = React.useState(null);
+    const [settingsDraft, setSettingsDraft] = React.useState(null);
+    const [savingSettings, setSavingSettings] = React.useState(false);
+    /** 一次性提示（导入结果之类），几秒后自动消失。 */
+    const [toast, setToast] = React.useState('');
+    const scrollRef = React.useRef(null);
+    const canvasRef = React.useRef(null);
+    const dragRef = React.useRef(null);
+
+    // 接口给的是 { version, notes }；这里统一取出便签数组，并兼容直接给数组的形态。
+    // 必须放在下面的 useCallback 之前：依赖数组会在渲染时立刻求值。
+    const notes = Array.isArray(board) ? board : (board?.notes ?? []);
+
+    const onBoard = React.useCallback((data) => {
+      setBoard(data.board);
+      setError('');
+    }, []);
+    boardSink.fn = onBoard;
+    React.useEffect(() => () => { boardSink.fn = null; }, []);
+
+    React.useEffect(() => {
+      let alive = true;
+      api.get()
+        .then((data) => { if (alive) setBoard(data.board); })
+        .catch((e) => { if (alive) setError(`看板加载失败：${e.message}`); });
+      api.getSettings()
+        .then((data) => { if (alive && data?.settings) { setSettings(data.settings); setSettingsDraft(data.settings); } })
+        .catch(() => { /* 设置读不到不挡画布 */ });
+      api.getCumulative()
+        .then((data) => { if (alive && data?.totals) setCumulative(data.totals); })
+        .catch(() => { /* 没有账本就先不显示 */ });
+      return () => { alive = false; };
+    }, []);
+
+    /** 画布高度：便签多了自动加高，不把最后一行截掉。 */
+    /** 两两之间是否有压盖（含简报卡）。 */
+    const anyOverlap = () => {
+      const hs = measureHeights(notes.map((n) => n.id));
+      for (let i = 0; i < notes.length; i += 1) {
+        for (let j = i + 1; j < notes.length; j += 1) {
+          const a = notes[i];
+          const b = notes[j];
+          const wA = widthOf(a);
+          const wB = widthOf(b);
+          const hA = hs.get(a.id) || heightOf(a);
+          const hB = hs.get(b.id) || heightOf(b);
+          if (a.x < b.x + wB && a.x + wA > b.x && a.y < b.y + hB && a.y + hA > b.y) return true;
+        }
+      }
+      return false;
+    };
+
+    /**
+     * 打开画布时自检一次：如果卡片互相压住了（旧数据、宿主按固定网格摆的），
+     * 自动按真实高度排开。只跑一次，不会一直动你的布局。
+     */
+    const autoPackOnce = React.useRef(false);
+    React.useEffect(() => {
+      if (autoPackOnce.current || board == null || dragActive) return;
+      autoPackOnce.current = true;
+      const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+      raf(() => {
+        if (!anyOverlap()) return;
+        const tasks = notes.filter((n) => n.kind !== 'brief');
+        if (!tasks.length) return;
+        const { positions, height } = packLayout(readingOrder(tasks));
+        setLayoutH(height);
+        void applyLayout(positions, tasks);
+      });
+    }, [board, dragActive]);
+
+    // 长任务跑的时候问一次宿主「到哪一步了」，好让界面有反馈
+    React.useEffect(() => {
+      if (!busyBrief && !busyImporting) { setProgress(null); return undefined; }
+      let alive = true;
+      const tick = async () => {
+        try {
+          const d = await api.progress();
+          if (alive) setProgress(d?.progress ?? null);
+        } catch { /* 拿不到就不显示 */ }
+      };
+      void tick();
+      const timer = setInterval(tick, 400);
+      return () => { alive = false; clearInterval(timer); };
+    }, [busyBrief, busyImporting]);
+
+    /** 拖拽中不轮询，免得把正在拖的卡片位置覆盖掉。 */
+    const draggingRef = React.useRef(false);
+    draggingRef.current = dragActive;
+
+    // 实时钉卡要能自己冒出来：面板可见时每 15 秒拉一次看板
+    React.useEffect(() => {
+      let alive = true;
+      const timer = setInterval(async () => {
+        if (!alive) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (draggingRef.current) return;
+        try {
+          const data = await api.get();
+          if (alive && data?.board) onBoard(data);
+        } catch { /* 拉不到就下次再说 */ }
+      }, 15_000);
+      return () => { alive = false; clearInterval(timer); };
+    }, [onBoard]);
+
+    /** 卡片占位：简报卡比便签宽一档。 */
+    const widthOf = (n) => (n.kind === 'brief' ? 360 : NOTE_W);
+    const heightOf = (n) => (n.kind === 'brief' ? 460 : NOTE_H);
+
+    /** 画布高度：排布算出来的高度优先，其次按最低那张卡估，卡片长高不会被截断。 */
+    const tallest = notes.reduce((m, n) => Math.max(m, n.y + heightOf(n)), 0);
+    const canvasH = Math.max(CANVAS_H, layoutH, tallest + MARGIN + 120);
+
+    /** 卡片实际高度：能测到就测，测不到用估算值。 */
+    const measureHeights = (ids) => {
+      const map = new Map();
+      for (const id of ids) {
+        const el = canvasRef.current?.querySelector?.(`[data-note-id="${id}"]`);
+        const h = el ? Number(el.getBoundingClientRect?.().height) || 0 : 0;
+        map.set(id, h);
+      }
+      return map;
+    };
+
+    /**
+     * 装箱：按传入顺序从左往右铺，一行放不下就换行；
+     * 每行的行高取该行最高的一张，所以高卡片不会压到下一行。
+     */
+    const packLayout = (list) => {
+      const heights = measureHeights(list.map((n) => n.id));
+      const positions = new Map();
+      // 简报卡位置固定，当作障碍物绕开（能放右边就放右边，不浪费整行）
+      const briefs = notes.filter((n) => n.kind === 'brief').map((n) => ({
+        x: n.x, y: n.y, w: widthOf(n), h: heights.get(n.id) || heightOf(n),
+      }));
+      const hitsBrief = (x, y, w, h) => briefs.find((b) => (
+        x < b.x + b.w + NOTE_GAP && x + w + NOTE_GAP > b.x && y < b.y + b.h + NOTE_GAP && y + h + NOTE_GAP > b.y
+      ));
+
+      let x = MARGIN;
+      let y = MARGIN;
+      let rowH = 0;
+      for (const n of list) {
+        const w = widthOf(n);
+        const h = heights.get(n.id) || heightOf(n);
+        if (x > MARGIN && x + w > CANVAS_W - MARGIN) {
+          x = MARGIN;
+          y += rowH + NOTE_GAP;
+          rowH = 0;
+        }
+        // 撞到简报卡：右边还有地方就往右让，放不下就整行下移
+        let guard = 0;
+        let blocker = hitsBrief(x, y, w, h);
+        while (blocker && guard < 20) {
+          guard += 1;
+          const right = blocker.x + blocker.w + NOTE_GAP;
+          if (right + w <= CANVAS_W - MARGIN) {
+            x = right;
+          } else {
+            x = MARGIN;
+            y = blocker.y + blocker.h + NOTE_GAP;
+            rowH = 0;
+          }
+          blocker = hitsBrief(x, y, w, h);
+        }
+        positions.set(n.id, { x, y });
+        x += w + NOTE_GAP;
+        rowH = Math.max(rowH, h);
+      }
+      const bottom = y + rowH + MARGIN;
+      return { positions, height: Math.max(CANVAS_H, bottom) };
+    };
+
+    /**
+     * 把位置写回宿主，然后重新拉一次看板。
+     * 这里**总是写全部**：两个窗口同时开着时，只写"本地认为变了"的会留下错位。
+     */
+    const applyLayout = async (positions, list = notes) => {
+      const patches = [];
+      for (const n of list) {
+        const p = positions.get(n.id);
+        if (!p) continue;
+        patches.push({ id: n.id, x: p.x, y: p.y });
+      }
+      // 一次请求写回全部位置：以前是每张卡一个请求，排 15 张就要 15 次整板读写
+      if (patches.length) await api.layout(patches);
+      const data = await api.get();
+      onBoard(data);
+    };
+
+    /** 除了简报卡（结论面板，固定在自己位置）之外的便签。 */
+    const taskNotes = () => notes.filter((n) => n.kind !== 'brief');
+
+    /**
+     * 便签在视觉上的先后，跟人读一行字一样：
+     * 上下差得不多就算同一行，同一行里按 x 从左往右，否则按 y 从上往下。
+     */
+    const ROW_TOLERANCE = 60;
+    const readingOrder = (list) => [...list].sort((a, b) => {
+      if (Math.abs(a.y - b.y) > ROW_TOLERANCE) return a.y - b.y;
+      if (Math.abs(a.x - b.x) > 1) return a.x - b.x;
+      return a.createdAt - b.createdAt;
+    });
+
+    /** 一键重排：按阅读顺序装箱（高度按实际内容算）。 */
+    const autoArrange = async () => {
+      if (!notes.length) return;
+      setBusyArranging(true);
+      try {
+        const { positions, height } = packLayout(readingOrder(taskNotes()));
+        setLayoutH(height);
+        await applyLayout(positions);
+      } catch (e) {
+        setError(`排列失败：${e.message}`);
+      } finally {
+        setBusyArranging(false);
+      }
+    };
+
+    /**
+     * 继续一个任务：把续做草稿放进剪贴板，再打开对应会话。
+     * 这个 DSH 版本没有「把文本放进输入框」的接口，所以草稿交给剪贴板；
+     * 剪贴板也不可用时，弹出来让人手动复制。
+     */
+    const continueTask = async (note) => {
+      const sessionId = note?.source?.id;
+      if (!sessionId) return;
+      const draft = buildDraft(note);
+      const copied = await copyText(draft);
+      openSession?.(sessionId);
+      if (copied) setToast('续做草稿已复制 · 在会话输入框粘贴即可');
+      else setDraftFallback(draft);
+    };
+
+    /** 重新拉取某张卡对应线程的最新待办。 */
+    const refreshCard = async (note) => {
+      const sessionId = note?.source?.id;
+      if (!sessionId) return;
+      try {
+        const data = await api.refreshSession(sessionId);
+        if (data?.board) onBoard(data);
+        const matched = data?.matched ?? 0;
+        setToast(matched ? '已刷新这张卡' : '没在最近会话里找到它（可能太旧了）');
+      } catch (e) {
+        setError(`刷新失败：${e.message}`);
+      }
+    };
+
+    /** 放弃 / 恢复一个任务。放弃后不计入「没做完」，以后拉取也不会复活。 */
+    const cancelCard = async (note, cancelled) => {
+      if (!note?.id) return;
+      try {
+        const data = await api.updateNote({ id: note.id, cancelled });
+        if (data?.board) onBoard(data);
+        setToast(cancelled ? '已放弃这个任务（可随时恢复）' : '已恢复到看板');
+      } catch (e) {
+        setError(`${cancelled ? '放弃' : '恢复'}失败：${e.message}`);
+      }
+    };
+
+    /** 生成助理简报：扫会话 → 拼简报 → 画布上放一张简报卡。 */
+    const generateBrief = async () => {
+      if (busyBrief) return;
+      const startedAt = Date.now();
+      setBusyBrief(true);
+      setProgress({ phase: '准备中', done: 0, total: 0, startedAt });
+      try {
+        const data = await api.generateBrief(24);
+        if (data?.board) onBoard(data);
+        if (data?.brief?.cumulative) setCumulative(data.brief.cumulative);
+        const r = data?.report ?? {};
+        const parts = [`扫描 ${r.scan?.sessions ?? 0} 个会话`];
+        parts.push(r.created ? '已放上简报卡' : '简报已更新');
+        parts.push(`用时 ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+        setToast(parts.join(' · '));
+      } catch (e) {
+        const raw = String(e.message);
+        setError(/未知路由|404/.test(raw)
+          ? '宿主还没加载简报接口：重启一次 DSH 后再试'
+          : /unauthorized|403/.test(raw)
+            ? '没有权限：刷新页面（或重启一次 DSH）'
+            : `生成简报失败：${raw}`);
+      } finally {
+        setBusyBrief(false);
+      }
+    };
+
+    /** 保存设置（时间/保留天数/开关）。 */
+    const saveSettings = async () => {
+      if (!settingsDraft || savingSettings) return;
+      setSavingSettings(true);
+      try {
+        const data = await api.saveSettings(settingsDraft);
+        if (data?.settings) {
+          setSettings(data.settings);
+          setSettingsDraft(data.settings);
+          setToast(`已保存：每天 ${data.settings.dailyTime} 生成简报，保留 ${data.settings.retentionDays} 天`);
+        }
+        setShowSettings(false);
+      } catch (e) {
+        setError(`保存设置失败：${e.message}`);
+      } finally {
+        setSavingSettings(false);
+      }
+    };
+
+    /** 扫所有工作区的会话，把每个会话最后的待办清单拉成便签。 */
+    const importSessions = async () => {
+      if (busyImporting) return;
+      const startedAt = Date.now();
+      setBusyImporting(true);
+      setProgress({ phase: '准备中', done: 0, total: 0, startedAt });
+      try {
+        const data = await api.importSessions();
+        if (data?.board) onBoard(data);
+        const r = data?.report ?? { created: 0, updated: 0, skipped: 0 };
+        const spent = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+        // 宿主是按固定网格摆的，卡片高矮不一会贴在一起：导完自动按真实高度排一次
+        if (r.created || r.updated) {
+          await new Promise((resolve) => {
+            const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+            raf(() => resolve());
+          });
+          const fresh = (data?.board?.notes ?? []).filter((n) => n.kind !== 'brief');
+          const { positions, height } = packLayout(readingOrder(fresh));
+          setLayoutH(height);
+          await applyLayout(positions, fresh);
+        }
+        const parts = [`扫描 ${data?.scanned ?? 0} 个会话`];
+        if (r.created) parts.push(`新增 ${r.created}`);
+        if (r.updated) parts.push(`刷新 ${r.updated}`);
+        if (r.skipped) parts.push(`跳过 ${r.skipped}（你改过）`);
+        if (!r.created && !r.updated && !r.skipped) parts.push('没找到带任务清单的会话');
+        if (data?.truncated) parts.push('（时间到，未扫完）');
+        parts.push(`用时 ${spent}s`);
+        setToast(parts.join(' · '));
+      } catch (e) {
+        const msg = /未知路由|404/.test(String(e.message))
+          ? '宿主还没加载拉取接口：重启一次 DSH 后再试'
+          : `拉取失败：${e.message}`;
+        setError(msg);
+      } finally {
+        setBusyImporting(false);
+      }
+    };
+
+    // 提示条 4 秒后自己消失
+    React.useEffect(() => {
+      if (!toast) return undefined;
+      const timer = setTimeout(() => setToast(''), 4000);
+      return () => clearTimeout(timer);
+    }, [toast]);
+
+    const createNote = React.useCallback(async () => {
+      const before = new Set(notes.map((n) => n.id));
+      try {
+        // 先落在左上角，随后整块重排；这样旧卡片会被推到右边
+        const data = await api.addNote({ text: '新便签', x: MARGIN, y: MARGIN });
+        const created = (data?.board?.notes ?? []).find((n) => !before.has(n.id));
+        if (created) setAutoEditId(created.id);
+        onBoard(data);
+
+        // 等一帧让新卡片进 DOM，才能量到真实高度
+        await new Promise((resolve) => {
+          const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
+          raf(() => resolve());
+        });
+
+        const fresh = (data?.board?.notes ?? []).filter((n) => n.kind !== 'brief');
+        // 最新的在最左，旧的依次右移
+        const ordered = [...fresh].sort((a, b) => b.createdAt - a.createdAt);
+        const { positions, height } = packLayout(ordered);
+        setLayoutH(height);
+        await applyLayout(positions, fresh);
+      } catch (e) {
+        setError(`新建失败：${e.message}`);
+      }
+    }, [notes]);
+
+    // 拖拽：pointermove / pointerup 挂在 window 上，指针移出便签也不丢。
+    // hot 状态同时写进 ref，pointerup 里读 ref 而不是 state，避免拖完第一帧拿不到。
+    React.useEffect(() => {
+      if (!dragActive) return undefined;
+      const move = (e) => {
+        const d = dragRef.current;
+        if (!d) return;
+        // 便签是绝对定位在画布里的，必须用画布坐标：
+        // 直接拿 clientX 当 left 会让卡片整体偏移一个滚动距离。
+        const canvas = canvasRef.current;
+        const rect = canvas?.getBoundingClientRect();
+        const left = rect?.left ?? 0;
+        const top = rect?.top ?? 0;
+        const maxX = Math.max(0, (canvas?.offsetWidth || 2600) - NOTE_W);
+        const maxY = Math.max(0, (canvas?.offsetHeight || 1800) - NOTE_H);
+        d.x = Math.min(Math.max(0, Math.round(e.clientX - left - d.grabX)), maxX);
+        d.y = Math.min(Math.max(0, Math.round(e.clientY - top - d.grabY)), maxY);
+        d.hot = isOverTrash(e.clientX, e.clientY);
+        setDrag({ id: d.id, x: d.x, y: d.y });
+        setDragHot(d.hot);
+      };
+      const up = () => {
+        const d = dragRef.current;
+        dragRef.current = null;
+        setDrag(null);
+        setDragActive(false);
+        setDragHot(false);
+        if (!d) return;
+        if (d.hot) {
+          api.deleteNote(d.id).then(onBoard).catch((e) => setError(`删除失败：${e.message}`));
+          return;
+        }
+        if (d.x === d.startX && d.y === d.startY) return;
+        api.updateNote({ id: d.id, x: d.x, y: d.y })
+          .then(onBoard)
+          .catch((e) => setError(`移动失败：${e.message}`));
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
+      return () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+      };
+    }, [dragActive, onBoard]);
+
+    const onDragStart = (e, id) => {
+      const note = notes.find((n) => n.id === id);
+      if (!note) return;
+      const noteRect = e.currentTarget.getBoundingClientRect();
+      dragRef.current = {
+        id,
+        // 指针在卡片内部的偏移：保证拖起来不跳
+        grabX: e.clientX - noteRect.left,
+        grabY: e.clientY - noteRect.top,
+        x: note.x,
+        y: note.y,
+        startX: note.x,
+        startY: note.y,
+        hot: false,
+      };
+      setDragActive(true);
+      setDrag({ id, x: note.x, y: note.y });
+    };
+
+    /** 指针是否落在垃圾桶上（垃圾桶只在拖拽时渲染）。 */
+    const isOverTrash = (cx, cy) => {
+      const el = document.getElementById('workbench-trash');
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
+    };
+
+    // 简报卡不算待办；已放弃的不算「没做完」
+    const tasks = notes.filter((n) => n.kind !== 'brief' && !n.cancelled);
+    const cancelledCount = notes.filter((n) => n.kind !== 'brief' && n.cancelled).length;
+    const reviewCount = notes.filter((n) => n.kind !== 'brief' && n.review && !n.done && !n.cancelled).length;
+    // 画布上始终显示：简报卡、未放弃的便签；（「只看没做完」时再滤掉已完成的）
+    const shown = notes.filter((n) => {
+      if (n.kind === 'brief') return true;
+      if (n.cancelled) return true; // 放弃的仍然看得见，可随时恢复
+      return hideDone ? !n.done : true;
+    });
+    const total = tasks.length;
+    const done = tasks.filter((n) => n.done).length;
+    const open = total - done;
+    const pct = total ? Math.round((done / total) * 100) : 0;
+
+    return h('div', { style: S.root },
+      h('style', { dangerouslySetInnerHTML: { __html: '@keyframes wb-spin{to{transform:rotate(360deg)}}' } }),
+      h('div', { style: S.topbar },
+        h('span', { style: S.title }, 'DSH 助理'),
+        h('span', { style: { ...S.chip, background: 'var(--dsw-alias-fill-l2, rgba(0,0,0,.06))' } }, `共 ${total}`),
+        h('span', { style: { ...S.chip, background: 'rgba(217,83,79,.12)', color: '#b83b38' } }, `没做完 ${open}`),
+        h('span', { style: { ...S.chip, background: 'rgba(63,157,82,.14)', color: '#2f7d40' } }, `已完成 ${done}${total ? ` · ${pct}%` : ''}`),
+        reviewCount
+          ? h('span', {
+            style: { ...S.chip, color: 'var(--dsw-alias-state-success-primary, #34c759)' },
+            title: '有线程刚跑完一轮，等你验收（点卡片上的「待验收」即可）',
+          }, `待验收 ${reviewCount}`)
+          : null,
+        cancelledCount
+          ? h('span', { style: S.chip }, `已放弃 ${cancelledCount}`)
+          : null,
+        cumulative
+          ? h('span', {
+            style: { ...S.chip, color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+            title: `长期累计：${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天${cumulative.firstDay ? `（${cumulative.firstDay} 起）` : ''}`,
+          }, `累计 ${fmtTokens(cumulative.tokens)} · ${fmtUsd(cumulative.usd)}`)
+          : null,
+        h('button', {
+          type: 'button',
+          onClick: () => setHideDone((v) => !v),
+          title: hideDone ? '显示已完成的便签' : '收起已完成的便签',
+          style: {
+            ...S.chip,
+            cursor: 'pointer',
+            lineHeight: '18px',
+            border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
+            background: hideDone ? 'rgba(63,157,82,.16)' : 'transparent',
+            color: 'inherit',
+          },
+        }, hideDone ? `只看没做完 · 已隐藏 ${done}` : '只看没做完'),
+        h('span', { style: S.spacer }),
+        h('button', {
+          type: 'button',
+          onClick: autoArrange,
+          disabled: busyArranging || total === 0,
+          title: '把所有便签按网格重新排好，铺满一行自动换行',
+          style: {
+            ...S.chip,
+            cursor: busyArranging || total === 0 ? 'default' : 'pointer',
+            lineHeight: '18px',
+            opacity: busyArranging || total === 0 ? 0.5 : 1,
+            border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
+            background: 'transparent',
+            color: 'inherit',
+          },
+        }, busyArranging ? '排列中…' : '自动排列'),
+        h('button', {
+          type: 'button',
+          onClick: generateBrief,
+          disabled: busyBrief,
+          title: '扫一遍所有会话，生成一份助理简报（目标/进展/待办/消耗/需要你出手的事）并放到画布上',
+          style: {
+            ...S.chip,
+            cursor: busyBrief ? 'default' : 'pointer',
+            lineHeight: '18px',
+            opacity: busyBrief ? 0.5 : 1,
+            border: '0.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.16))',
+            background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.10))',
+            color: 'inherit',
+            fontWeight: 600,
+          },
+        }, busyBrief ? '生成中…' : '生成简报'),
+        h('button', {
+          type: 'button',
+          onClick: () => setShowSettings((v) => !v),
+          title: '简报设置：每天几点生成、快照保留多久',
+          style: {
+            ...S.chip,
+            cursor: 'pointer',
+            lineHeight: '18px',
+            border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
+            background: showSettings ? 'var(--dsw-alias-fill-l2, rgba(0,0,0,.06))' : 'transparent',
+            color: 'inherit',
+          },
+        }, '设置'),
+        h('button', {
+          type: 'button',
+          onClick: importSessions,
+          disabled: busyImporting,
+          title: '扫描所有工作区的线程，把每个会话最后的待办清单拉成便签（按会话去重，不动你改过的卡）',
+          style: {
+            ...S.chip,
+            cursor: busyImporting ? 'default' : 'pointer',
+            lineHeight: '18px',
+            opacity: busyImporting ? 0.5 : 1,
+            border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
+            background: 'transparent',
+            color: 'inherit',
+          },
+        }, busyImporting ? '拉取中…' : '拉取线程任务'),
+        h('span', { style: S.spacer }),
+        h('span', { style: S.hint }, '双击空白新建'),
+        h('button', {
+          type: 'button',
+          onClick: createNote,
+          style: {
+            height: '26px', padding: '0 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px',
+            border: '0.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.16))',
+            background: 'var(--dsw-specific-menu, rgba(0,0,0,.04))',
+            color: 'inherit',
+          },
+        }, '＋ 新建便签')),
+      h('div', { style: S.canvasWrap },
+        h('div', {
+          ref: scrollRef,
+          style: S.canvasScroll,
+          onDoubleClick: (e) => {
+            // 只有双击在空白画布底上才新建
+            if (e.target !== canvasRef.current) return;
+            createNote();
+          },
+        },
+        h('div', {
+          ref: canvasRef,
+          style: { ...S.canvas, width: `${CANVAS_W}px`, height: `${canvasH}px` },
+        },
+          shown.map((n) => (n.kind === 'brief'
+            ? h(BriefCard, {
+              key: n.id,
+              note: n,
+              drag: drag && drag.id === n.id ? drag : null,
+              dragHot,
+              onOpenSession: openSession,
+              onDragStart,
+            })
+            : h(Note, {
+              key: n.id,
+              note: n,
+              drag: drag && drag.id === n.id ? drag : null,
+              dragHot,
+              autoEdit: autoEditId === n.id,
+              onOpenSession: openSession,
+              onRefresh: refreshCard,
+              onCancel: cancelCard,
+              onContinue: continueTask,
+              onDragStart,
+              onDelete: () => api.deleteNote(n.id).then(onBoard).catch((e) => setError(`删除失败：${e.message}`)),
+            }))))),
+        board == null && !error ? h('div', { style: S.loading }, '加载看板…') : null,
+        board != null && total > 0 && shown.length === 0
+          ? h('div', { style: S.empty },
+            h('div', { style: S.emptyTitle }, '没有没做完的了'),
+            h('div', null, `已完成的 ${done} 张都收起来了，点顶栏「只看没做完」可以再展开`))
+          : null,
+        board != null && total === 0
+          ? h('div', { style: S.empty },
+            h('div', { style: S.emptyTitle }, '画布是空的'),
+            h('div', null, '双击空白处，或点右下角 ＋ 放上第一张便签'),
+            h('div', null, '做完直接勾掉，没做完就继续往上补进展'))
+          : null,
+        (busyBrief || busyImporting) && progress
+          ? h('div', { style: S.progress },
+            h('div', { style: S.progressRow },
+              h('span', { style: S.spinner }),
+              h('span', null, progress.phase || '处理中'),
+              progress.total
+                ? h('span', { style: { marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', opacity: 0.75 } }, `${progress.done}/${progress.total}`)
+                : null,
+              h('span', { style: { marginLeft: progress.total ? '6px' : 'auto', fontVariantNumeric: 'tabular-nums', opacity: 0.6 } },
+                `${Math.max(0, (Date.now() - (progress.startedAt || Date.now())) / 1000).toFixed(1)}s`)),
+            h('div', { style: S.progressTrack },
+              h('div', {
+                style: {
+                  ...S.progressFill,
+                  width: progress.total ? `${Math.min(100, Math.round((progress.done / progress.total) * 100))}%` : '35%',
+                },
+              })))
+          : null,
+        showSettings
+          ? h('div', { style: S.settingsPanel },
+            h('div', { style: { fontSize: '12px', fontWeight: 600 } }, 'DSH 助理'),
+            h('div', { style: S.settingsRow },
+              h('span', { style: S.settingsLabel }, '每天生成时间'),
+              h('input', {
+                type: 'time',
+                style: S.settingsInput,
+                value: settingsDraft?.dailyTime ?? '08:00',
+                onChange: (e) => setSettingsDraft({ ...(settingsDraft ?? {}), dailyTime: e.target.value }),
+              })),
+            h('div', { style: S.settingsRow },
+              h('span', { style: S.settingsLabel }, '快照保留天数'),
+              h('input', {
+                type: 'number',
+                min: 1,
+                max: 3650,
+                style: S.settingsInput,
+                value: settingsDraft?.retentionDays ?? 90,
+                onChange: (e) => setSettingsDraft({ ...(settingsDraft ?? {}), retentionDays: Number(e.target.value) }),
+              })),
+            h('div', { style: S.settingsRow },
+              h('span', { style: S.settingsLabel }, '每天自动生成'),
+              h('input', {
+                type: 'checkbox',
+                checked: settingsDraft?.enabled !== false,
+                onChange: (e) => setSettingsDraft({ ...(settingsDraft ?? {}), enabled: e.target.checked }),
+              })),
+            h('div', { style: S.settingsHint }, '按本机时区。到点且今天还没出过简报时生成；开机时若已过点会补一份。'),
+            h('div', { style: { display: 'flex', gap: '8px', marginTop: '2px' } },
+              h('button', {
+                type: 'button',
+                onClick: saveSettings,
+                disabled: savingSettings,
+                style: { ...S.crashBtn, flex: '1', height: '26px', fontSize: '11.5px' },
+              }, savingSettings ? '保存中…' : '保存'),
+              h('button', {
+                type: 'button',
+                onClick: () => { setSettingsDraft(settings); setShowSettings(false); },
+                style: { ...S.crashBtn, flex: '1', height: '26px', fontSize: '11.5px' },
+              }, '取消')))
+          : null,
+        draftFallback
+          ? h('div', { style: S.draftModal },
+            h('div', { style: { fontSize: '12.5px', fontWeight: 600 } }, '续做草稿（剪贴板不可用，手动复制）'),
+            h('textarea', {
+              style: S.draftArea,
+              readOnly: true,
+              value: draftFallback,
+              autoFocus: true,
+              onFocus: (e) => e.target.select(),
+            }),
+            h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+              h('button', { type: 'button', style: S.crashBtn, onClick: () => setDraftFallback(null) }, '关闭')))
+          : null,
+        toast ? h('div', { style: S.toast }, toast) : null,
+        error ? h('div', { style: S.error }, error) : null,
+        drag
+          ? h('div', {
+            id: 'workbench-trash',
+            style: { ...S.trash, ...(dragHot ? S.trashHot : {}) },
+          }, trashSvg(React, dragHot ? '#d9534f' : '#8a8a8a'))
+          : h('button', {
+            type: 'button',
+            style: S.fab,
+            title: '新建便签',
+            onClick: createNote,
+          }, '＋')));
+  };
+}
+
+/**
+ * 把一张卡的目标/未完成待办/最近进展/产出拼成「续做草稿」。
+ * 这个 DSH 版本没有把文本放进输入框的能力，所以草稿走剪贴板，由你粘贴。
+ */
+function buildDraft(note) {
+  const lines = [];
+  lines.push('接着上面的进度继续这个任务。');
+  lines.push('');
+  if (note.goal) lines.push(`【目标】${note.goal}`);
+  const open = (note.todos ?? []).filter((t) => t.status !== 'completed');
+  if (open.length) {
+    lines.push('【还没做完】');
+    for (const t of open.slice(0, 8)) lines.push(`- ${t.content}${t.status === 'in_progress' ? '（进行中）' : ''}`);
+  }
+  const recent = (note.updates ?? []).slice(-3);
+  if (recent.length) {
+    lines.push('【最近进展】');
+    for (const u of recent) lines.push(`- ${u.text}`);
+  }
+  const files = note.deliverables ?? [];
+  if (files.length) {
+    lines.push('【已有产出】');
+    for (const f of files.slice(0, 6)) lines.push(`- ${f}`);
+  }
+  if (note.text) lines.push('', `（来自「${note.text}」这条线程）`);
+  return lines.join('\n').trim();
+}
+
+/** 复制到剪贴板；失败返回 false，由调用方退化到弹层。 */
+async function copyText(text) {
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* 落到 execCommand */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand?.('copy');
+    document.body.removeChild(ta);
+    return ok !== false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 跳到某个会话：DSH 的 uiWorkspace.openSession 会「选中会话并打开对话」，
+ * 正好是一次界面导航。服务不存在时退化成提示，不报错。
+ */
+function makeNavigator(ctx) {
+  const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined;
+  const layout = typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
+  return (sessionId) => {
+    if (!sessionId) return false;
+    try {
+      if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
+        uiWorkspace.openSession(sessionId);
+        return true;
+      }
+      if (layout && typeof layout.selectPanel === 'function') {
+        layout.selectPanel('conversation');
+        return true;
+      }
+    } catch (error) {
+      console.error('[workbench] 打开会话失败', error);
+    }
+    return false;
+  };
+}
+
+function apply(ctx) {
+  const React = runtime.React;
+  const Icon = makeIcon(React);
+  const openSession = makeNavigator(ctx);
+  const Workspace = makeWorkspace(React, openSession);
+  const Boundary = makeBoundary(React);
+
+  // 包一层错误边界：以后再出渲染异常，面板里会显示原因和「重试」。
+  function Panel(props) {
+    return React.createElement(Boundary, null, React.createElement(Workspace, props));
+  }
+
+  // 侧边栏入口
+  ctx.effect(() =>
+    ctx.slots.inject('sidebar.panellist', () =>
+      ctx.slots.register(
+        { name: 'sidebar.panellist', id: PANEL_ID, order: 15, label: () => 'DSH 助理', locale: NS },
+        Icon,
+      )));
+
+  // 主面板：key 必须和侧边栏 id 一致，否则点开是空白
+  ctx.effect(() =>
+    ctx.slots.inject('main', () =>
+      ctx.slots.register(
+        { name: 'main', key: PANEL_ID, locale: NS },
+        Panel,
+      )));
+}
+
+window.__ModuleLoader__.load({
+  id: 'dsh-secretary/client',
+  factory: (require) => {
+    runtime.React = require('react');
+    const module = { exports: {} };
+    Object.assign(module.exports, { apply, inject, NS, PANEL_ID });
+    return module.exports;
+  },
+});

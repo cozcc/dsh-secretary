@@ -1,0 +1,10 @@
+# dsh-secretary — 宿主侧的插件行。
+#
+# 数据默认落在 ~/.dsh/secretary（board.json / briefs / cumulative.json / session-digests.json）。
+# 想换目录就改下面的 dataDir，改完需要重启 DSH。
+
+- insert:
+    - id: secretary
+      name: dsh-secretary
+      config:
+        dataDir: ""
