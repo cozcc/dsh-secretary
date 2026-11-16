@@ -185,6 +185,30 @@ check('筛选按钮显示隐藏张数', !!showAllBtn, [...host.querySelectorAll(
 await act(async () => { showAllBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 30)); });
 check('再点恢复显示', text().includes('写周报') && text().includes('回邮件'));
 
+// 切「只看没做完」后应自动重排：新建一张未完成卡，再开筛选，它应回到左上角
+await act(async () => { byText('＋ 新建便签').click(); await new Promise((r) => setTimeout(r, 220)); });
+await act(async () => { byText('只看没做完').click(); await new Promise((r) => setTimeout(r, 260)); });
+const visibleOpen = notes.filter((n) => n.kind !== 'brief' && !n.done && !n.cancelled)
+  .sort((a, b) => (a.y - b.y) || (a.x - b.x));
+check('筛选后第一张可见便签回到左上', visibleOpen.length > 0 && visibleOpen[0].x === 40 && visibleOpen[0].y === 40,
+  visibleOpen[0] ? `x=${visibleOpen[0].x} y=${visibleOpen[0].y}` : '没有未完成便签');
+check('筛选后可见便签互不重叠', (() => {
+  const W = 248; const H = 200;
+  for (let i = 0; i < visibleOpen.length; i += 1) {
+    for (let j = i + 1; j < visibleOpen.length; j += 1) {
+      const a = visibleOpen[i]; const b = visibleOpen[j];
+      if (a.x < b.x + W && a.x + W > b.x && a.y < b.y + H && a.y + H > b.y) return false;
+    }
+  }
+  return true;
+})());
+await act(async () => {
+  const back = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').includes('隐藏'));
+  if (back) back.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 200));
+});
+
+
 // 新建便签：应自动进入编辑态（出现 textarea）
 await act(async () => { byText('＋ 新建便签').click(); await new Promise((r) => setTimeout(r, 50)); });
 check('新建后出现编辑框', !!host.querySelector('textarea'), host.innerHTML.slice(-300));
