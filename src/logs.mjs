@@ -193,9 +193,8 @@ function dayOf(time) {
  * 从事件流里提炼「摘要」。这是缓存的单位：文件签名不变就复用。
  *
  * @param {object[]} events
- * @param {{ costOf: (usage:object, model:string, time:number) => {usd:number, known:boolean} }} deps
  */
-export function digestEvents(events, { costOf }) {
+export function digestEvents(events) {
   const d = {
     sessionId: '',
     cwd: '',
@@ -213,7 +212,7 @@ export function digestEvents(events, { costOf }) {
     lastTurnEnd: null,
     lastActivity: 0,
     usageByDay: {},
-    usageTotals: { input: 0, output: 0, cached: 0, usd: 0, estimated: false },
+    usageTotals: { input: 0, output: 0, cached: 0 },
     badLines: 0,
   };
 
@@ -260,23 +259,18 @@ export function digestEvents(events, { costOf }) {
       const msg = event?.data?.message;
       const usage = event?.data?.usage;
       if (usage) {
-        const model = msg?.source?.model ?? '';
-        const cost = costOf(usage, model, time);
         const day = dayOf(time);
-        const bucket = d.usageByDay[day] ?? { input: 0, output: 0, cached: 0, usd: 0 };
+        const bucket = d.usageByDay[day] ?? { input: 0, output: 0, cached: 0 };
         const input = Number(usage.inputTokens) || 0;
         const output = Number(usage.outputTokens) || 0;
         const cached = Number(usage.cacheReadTokens) || 0;
         bucket.input += input;
         bucket.output += output;
         bucket.cached += cached;
-        bucket.usd += cost.usd;
         d.usageByDay[day] = bucket;
         d.usageTotals.input += input;
         d.usageTotals.output += output;
         d.usageTotals.cached += cached;
-        d.usageTotals.usd += cost.usd;
-        if (cost.known === false) d.usageTotals.estimated = true;
       }
       for (const block of msg?.content ?? []) {
         if (block?.type !== 'tool-call') continue;

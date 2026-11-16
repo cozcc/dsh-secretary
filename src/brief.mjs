@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { fmtTokens, fmtUsd } from './pricing.mjs';
+import { fmtTokens } from './pricing.mjs';
 
 const MAX_ITEMS = 6;
 
@@ -59,7 +59,7 @@ function itemLines(portrait) {
   const t = todoLine(portrait);
   if (t) lines.push({ text: t, tone: 'muted' });
   if (portrait.usage?.totalTokens) {
-    lines.push({ text: `消耗 ${fmtTokens(portrait.usage.totalTokens)} tokens · ${fmtUsd(portrait.usage.usd)}`, tone: 'muted' });
+    lines.push({ text: `消耗 ${fmtTokens(portrait.usage.totalTokens)} tokens`, tone: 'muted' });
   }
   if (portrait.deliverables?.length) lines.push({ text: `产出 ${portrait.deliverables.length} 个文件`, tone: 'ok' });
   return lines;
@@ -84,11 +84,10 @@ export function composeBrief(portraits, { sinceMs, now = Date.now(), scanInfo = 
   const tokenTotals = list.reduce((acc, p) => {
     acc.input += p.usage?.inputTokens ?? 0;
     acc.output += p.usage?.outputTokens ?? 0;
-    acc.usd += p.usage?.usd ?? 0;
     acc.cached += p.usage?.cacheReadTokens ?? 0;
     if (p.usage?.estimated) acc.estimated = true;
     return acc;
-  }, { input: 0, output: 0, usd: 0, cached: 0, estimated: false });
+  }, { input: 0, output: 0, cached: 0 });
 
   const todosOpen = list.reduce((n, p) => n + (p.todos ?? []).filter((t) => t.status !== 'completed').length, 0);
   const deliverables = list.reduce((n, p) => n + (p.deliverables?.length ?? 0), 0);
@@ -119,7 +118,7 @@ export function composeBrief(portraits, { sinceMs, now = Date.now(), scanInfo = 
     (failed.length + waiting.length + stalled.length)
       ? `需要你出手 ${failed.length + waiting.length + stalled.length}`
       : '没有卡住的',
-    `消耗 ${fmtTokens(tokenTotals.input + tokenTotals.output + tokenTotals.cached)} tokens / ${fmtUsd(tokenTotals.usd)}`,
+    `消耗 ${fmtTokens(tokenTotals.input + tokenTotals.output + tokenTotals.cached)} tokens`,
   ].filter(Boolean).join(' · ');
   sections.push({
     key: 'headline',
@@ -190,25 +189,23 @@ export function composeBrief(portraits, { sinceMs, now = Date.now(), scanInfo = 
   for (const p of list) {
     if (!p.usage?.totalTokens) continue;
     const key = p.workspace || '未归类';
-    const cur = byWorkspace.get(key) ?? { tokens: 0, usd: 0 };
+    const cur = byWorkspace.get(key) ?? { tokens: 0 };
     cur.tokens += p.usage.totalTokens;
-    cur.usd += p.usage.usd;
     byWorkspace.set(key, cur);
   }
   const costLines = [
     { text: `输入 ${fmtTokens(tokenTotals.input + tokenTotals.cached)}（命中 ${fmtTokens(tokenTotals.cached)}）· 输出 ${fmtTokens(tokenTotals.output)}`, tone: 'muted' },
-    { text: `按官方价估算 ${fmtUsd(tokenTotals.usd)}${tokenTotals.estimated ? '（含未知模型，按 flash 估）' : ''}`, tone: 'normal' },
   ];
-  for (const [ws, v] of [...byWorkspace.entries()].sort((a, b) => b[1].usd - a[1].usd).slice(0, 4)) {
-    costLines.push({ text: `${ws}：${fmtTokens(v.tokens)} · ${fmtUsd(v.usd)}`, tone: 'muted' });
+  for (const [ws, v] of [...byWorkspace.entries()].sort((a, b) => b[1].tokens - a[1].tokens).slice(0, 4)) {
+    costLines.push({ text: `${ws}：${fmtTokens(v.tokens)} tokens`, tone: 'muted' });
   }
   if (scanInfo.truncated) costLines.push({ text: '（扫描超时，未覆盖全部会话）', tone: 'muted' });
-  sections.push({ key: 'cost', title: '消耗', tone: 'normal', lines: costLines });
+  sections.push({ key: 'cost', title: 'token 用量', tone: 'normal', lines: costLines });
 
   // 5.5) 长期累计（不受快照保留期影响）
   if (cumulative) {
     const lines = [
-      { text: `累计 ${fmtTokens(cumulative.tokens)} tokens · ${fmtUsd(cumulative.usd)}`, tone: 'strong' },
+      { text: `累计 ${fmtTokens(cumulative.tokens)} tokens`, tone: 'strong' },
       { text: `共 ${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天${cumulative.firstDay ? `（${cumulative.firstDay} 起）` : ''}`, tone: 'muted' },
     ];
     sections.push({ key: 'cumulative', title: '长期累计', tone: 'normal', lines });

@@ -34,19 +34,12 @@
 - Runs automatically at a configurable local time (default **08:00**), and catches up at startup if today's briefing is missing
 - Snapshots live in `briefs/YYYY-MM-DD.json`, pruned after 90 days (configurable)
 
-### 4. Cost, in official prices
-- Computed from `assistant/message.usage` with DeepSeek's official per-1M-token prices:
-  - `deepseek-flash` and `deepseek-v4-pro`
-  - cache-hit input / cache-miss input / output, priced separately
-  - off-peak is half of peak; peak = UTC weekdays 01–04 and 06–10
-- Cache semantics verified against real logs: `inputTokens` is the **cache-miss** part, `cacheReadTokens` the hit part, `totalTokens = input + output + cacheRead`
-
-### 5. Long-term totals that never expire
+### 4. Long-term totals that never expire
 - `cumulative.json` keeps a per-session, per-day ledger forever (brief snapshots are pruned, this is not)
 - Idempotent: re-reading a thread replaces its bucket instead of adding again
-- Shown in the top bar (`累计 2.86B · $38.89`) and as a section in every briefing
+- Shown in the top bar (`累计 2.86B tokens`) and as a section in every briefing
 
-### 6. Real-time review badges
+### 5. Real-time review badges
 - When a thread finishes a turn (`turn/end` with `completed`), its card is flagged **待验收** immediately — no scan required
 - Click the badge to accept it (same as ticking the note)
 

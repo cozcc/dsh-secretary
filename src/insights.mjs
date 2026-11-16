@@ -13,7 +13,7 @@ import {
   listSessionLogs, decodeSessionFile, digestEvents, readWorkspaces, readCachedGoal,
   loadDigestCache, saveDigestCache,
 } from './logs.mjs';
-import { usageCost, sumUsage } from './pricing.mjs';
+import { sumUsage } from './pricing.mjs';
 
 function failureOf(lastTurnEnd) {
   const kind = lastTurnEnd?.reason?.kind;
@@ -74,7 +74,7 @@ export async function collectPortraits({
             log(`会话 ${entry.sessionId.slice(0, 14)} 没解析出任何事件，跳过（不写缓存）`);
             continue;
           }
-          digest = digestEvents(events, { costOf: usageCost });
+          digest = digestEvents(events);
           digest.badLines = badLines;
           cache.sessions[entry.sessionId] = { sig: entry.sig, digest };
           cacheDirty = true;
@@ -132,7 +132,6 @@ export async function collectPortraits({
 
     const usage = sumUsage(Object.values(digest.usageByDay ?? {}).map((v) => ({
       inputTokens: v.input, outputTokens: v.output, cacheReadTokens: v.cached,
-      usd: v.usd, known: true,
     })));
 
     const title = (digest.title

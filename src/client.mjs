@@ -599,15 +599,6 @@ function fmtTokens(n) {
   return String(Math.round(v));
 }
 
-/** 金额：小额保留更多位数，避免显示成 $0.00 */
-function fmtUsd(usd) {
-  const v = Number(usd) || 0;
-  if (v === 0) return '$0';
-  if (v < 0.01) return `$${v.toFixed(4)}`;
-  if (v < 1) return `$${v.toFixed(3)}`;
-  return `$${v.toFixed(2)}`;
-}
-
 function fmtTime(ts) {
   if (!ts) return '';
   const d = new Date(ts);
@@ -1071,7 +1062,7 @@ function makeWorkspace(React, openSession) {
     const [busyImporting, setBusyImporting] = React.useState(false);
     /** 生成简报进行中。 */
     const [busyBrief, setBusyBrief] = React.useState(false);
-    /** 长期累计（tokens / 费用 / 线程数），不随 90 天快照清理。 */
+    /** 长期累计（tokens / 线程数），不随 90 天快照清理。 */
     const [cumulative, setCumulative] = React.useState(null);
     /** 长任务的进度（扫描/解析中显示）。 */
     const [progress, setProgress] = React.useState(null);
@@ -1670,7 +1661,7 @@ function makeWorkspace(React, openSession) {
           ? h('span', {
             style: S.chip,
             title: `长期累计：${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天${cumulative.firstDay ? `（${cumulative.firstDay} 起）` : ''}`,
-          }, `累计 ${fmtTokens(cumulative.tokens)} · ${fmtUsd(cumulative.usd)}`)
+          }, `累计 ${fmtTokens(cumulative.tokens)} tokens`)
           : null,
         h('span', { style: S.spacer }),
 

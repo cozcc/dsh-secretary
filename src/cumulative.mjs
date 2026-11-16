@@ -8,7 +8,7 @@
  *     sessions: {
  *       [sessionId]: {
  *         updatedAt: <会话最后更新时间>,
- *         days: { 'YYYY-MM-DD': { input, output, cached, usd } }
+ *         days: { 'YYYY-MM-DD': { input, output, cached } }
  *       }
  *     }
  *   }
@@ -64,7 +64,7 @@ export function isIngested(ledger, sessionId, updatedAt) {
  * @param {object} ledger
  * @param {string} sessionId
  * @param {number} updatedAt 会话最后更新时间，用来判断是否需要重读
- * @param {Record<string, {input:number, output:number, cached:number, usd:number}>} days
+ * @param {Record<string, {input:number, output:number, cached:number}>} days
  */
 export function ingest(ledger, sessionId, updatedAt, days) {
   const id = String(sessionId);
@@ -75,7 +75,6 @@ export function ingest(ledger, sessionId, updatedAt, days) {
       input: Number(v.input) || 0,
       output: Number(v.output) || 0,
       cached: Number(v.cached) || 0,
-      usd: Number(v.usd) || 0,
     };
   }
   ledger.sessions[id] = { updatedAt: Number(updatedAt) || 0, days: clean };
@@ -84,7 +83,7 @@ export function ingest(ledger, sessionId, updatedAt, days) {
 
 /** 所有会话所有天的合计。 */
 export function totals(ledger) {
-  const total = { input: 0, output: 0, cached: 0, usd: 0, days: new Set(), sessions: 0, estimated: false };
+  const total = { input: 0, output: 0, cached: 0, days: new Set(), sessions: 0 };
   for (const rec of Object.values(ledger.sessions ?? {})) {
     const days = rec?.days ?? {};
     const keys = Object.keys(days);
@@ -95,7 +94,6 @@ export function totals(ledger) {
       total.input += v.input ?? 0;
       total.output += v.output ?? 0;
       total.cached += v.cached ?? 0;
-      total.usd += v.usd ?? 0;
       total.days.add(day);
     }
   }
@@ -105,7 +103,6 @@ export function totals(ledger) {
     output: total.output,
     cached: total.cached,
     tokens: total.input + total.output + total.cached,
-    usd: total.usd,
     sessions: total.sessions,
     days: days.length,
     firstDay: days[0] ?? null,
@@ -118,11 +115,10 @@ export function dailySeries(ledger, limit = 14) {
   const byDay = new Map();
   for (const rec of Object.values(ledger.sessions ?? {})) {
     for (const [day, v] of Object.entries(rec?.days ?? {})) {
-      const cur = byDay.get(day) ?? { day, input: 0, output: 0, cached: 0, usd: 0 };
+      const cur = byDay.get(day) ?? { day, input: 0, output: 0, cached: 0 };
       cur.input += v.input ?? 0;
       cur.output += v.output ?? 0;
       cur.cached += v.cached ?? 0;
-      cur.usd += v.usd ?? 0;
       byDay.set(day, cur);
     }
   }

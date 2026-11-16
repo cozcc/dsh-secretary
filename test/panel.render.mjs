@@ -496,7 +496,7 @@ check('继续同时打开会话', opened.length > openedBefore, JSON.stringify(o
 
 
 // ── 长期累计：顶栏显示累计 tokens 与费用 ────────────────
-check('顶栏显示长期累计', text().includes('累计 1.45B') && text().includes('$19.48'), text().slice(0, 160));
+check('顶栏显示长期累计', text().includes('累计 1.45B') && !text().includes('$'), text().slice(0, 160));
 
 
 // ── 待验收：徽标与顶栏计数 ─────────────────────────────
