@@ -80,6 +80,12 @@ test('简报卡：同一天只保留一张，重复生成就地更新', () => {
 
   // 简报卡不算待办
   assert.deepEqual(stats(board), { total: 0, done: 0, open: 0, cancelled: 0, briefs: 1 });
+
+  // 换一天生成：旧的简报卡应当被清掉，画布上只留一份
+  const other = upsertBriefNote(board, { ...brief, date: '2030-01-01', generatedAt: 5000 }, 6000);
+  assert.equal(other.created, true);
+  assert.equal(board.notes.filter((n) => n.kind === 'brief').length, 1);
+  assert.equal(board.notes.find((n) => n.kind === 'brief').brief.date, '2030-01-01');
 });
 
 test('快照：保存、按日期列历史、超过保留期清理', () => {

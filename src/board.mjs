@@ -403,6 +403,8 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
  * 简报卡比普通便签宽，所以单独找一个 380 宽的空位。
  */
 export function upsertBriefNote(board, brief, now = Date.now()) {
+  // 先清掉别的日期的旧简报卡（含旧口径文本），再找今天这张
+  board.notes = board.notes.filter((n) => n.kind !== 'brief' || n.brief?.date === brief.date);
   const existing = board.notes.find((n) => n.kind === 'brief' && n.brief?.date === brief.date);
   const payload = {
     date: brief.date,
