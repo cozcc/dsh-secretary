@@ -138,3 +138,24 @@ test('工作区注册表映射', () => {
   const map = readWorkspaces(home);
   assert.equal(map.get('session-abc').title, 'Playground');
 });
+
+
+test('阶段按任务内容切分：状态变化不算新阶段', () => {
+  const now = Date.now();
+  const usage = { inputTokens: 10, outputTokens: 1, cacheReadTokens: 0 };
+  const call = (at, todos) => ({
+    type: 'assistant/message', time: at,
+    data: { usage, message: { role: 'assistant', source: { kind: 'model', provider: 'p', model: 'm' },
+      content: [{ type: 'tool-call', id: 'c', name: 'todo_write', arguments: JSON.stringify({ todos }) }] } },
+  });
+  const events = [
+    { type: 'session', version: 4, id: 's', cwd: '/tmp' },
+    call(now - 3000, [{ content: 'A', status: 'pending' }, { content: 'B', status: 'pending' }]),
+    call(now - 2000, [{ content: 'A', status: 'completed' }, { content: 'B', status: 'pending' }]),
+    call(now - 1000, [{ content: 'C', status: 'pending' }]),
+  ];
+  const d = digestEvents(events);
+  assert.equal(d.stages.length, 2, `应该是 2 个阶段，实际 ${d.stages.length}`);
+  assert.equal(d.stages[0].items[0].status, 'completed', '同一阶段保留最新状态');
+  assert.equal(d.stages[1].items[0].content, 'C');
+});

@@ -170,13 +170,21 @@ function safeJson(raw) {
   }
 }
 
-/** 记一个任务阶段（连续相同的清单不重复记）。 */
+/**
+ * 记一个任务阶段。
+ * 阶段的身份只看**任务内容**，不看勾选状态：同一个任务从 pending 变 completed
+ * 仍然是同一个阶段（只是把最新状态更新进去），否则每个勾选都会多出一个"阶段"。
+ */
 function pushStage(d, todos, at) {
   if (!todos?.length) return;
-  const key = todos.map((t) => `${t.content}::${t.status}`).join('|');
-  if (key === d.stageKey) return;
+  const items = todos.map((t) => ({ content: t.content, status: t.status }));
+  const key = todos.map((t) => t.content).join('|');
+  if (key === d.stageKey) {
+    d.stages[d.stages.length - 1].items = items;
+    return;
+  }
   d.stageKey = key;
-  d.stages.push({ at, items: todos.map((t) => ({ content: t.content, status: t.status })) });
+  d.stages.push({ at, items });
   if (d.stages.length > 20) d.stages.shift();
 }
 
@@ -321,7 +329,7 @@ export function digestEvents(events) {
 
 const CACHE_FILE = 'session-digests.json';
 /** 摘要格式版本：不兼容时整份缓存作废（例如解压失败曾写入空摘要）。 */
-const DIGEST_CACHE_VERSION = 2;
+const DIGEST_CACHE_VERSION = 3; // 3: 阶段按内容切分（旧版按状态切分，会过度切分）
 
 export function loadDigestCache(dataDir) {
   try {
