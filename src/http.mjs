@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stats, importSessions, applyPositions, findNote, noteToMarkdown } from './board.mjs';
+import { stats, importSessions, applyPositions, findNote, noteToMarkdown, removeNotesBySources } from './board.mjs';
 import { scanSessions } from './sessions.mjs';
 import { readSettings, writeSettings } from './settings.mjs';
 import { runBrief } from './briefing.mjs';
@@ -244,7 +244,12 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
                 onProgress,
               }));
               const picked = only ? scan.sessions.filter((s2) => only.has(String(s2.sessionId))) : scan.sessions;
-              const { board, result } = await store.mutate((b) => importSessions(b, picked));
+              const { board, result } = await store.mutate((b) => {
+                const report = importSessions(b, picked);
+                // 早期版本把子代理线程也导进来了：每次导入顺手清掉这些遗留卡
+                const cleaned = removeNotesBySources(b, scan.subagentIds ?? []);
+                return { ...report, cleaned };
+              });
               return json(res, 200, {
                 ...payload(board),
                 report: result,

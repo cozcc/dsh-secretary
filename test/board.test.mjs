@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import {
   applyPositions,
+  removeNotesBySources,
   importSessions,
   normalizeBoard,
   noteToMarkdown,
@@ -291,4 +292,19 @@ test('单卡导出 Markdown：含状态、正文、待办、进展、产出、�
   assert.match(md, /## 进展[\s\S]*写完了导出/);
   assert.match(md, /## 产出[\s\S]*\/tmp\/a\.md/);
   assert.match(md, /## 变更历史/);
+});
+
+
+test('按来源清理：子代理遗留卡会被删掉（带/不带 session- 前缀都认）', () => {
+  const board = normalizeBoard({});
+  importSessions(board, [
+    { sessionId: 'session-aaa', title: '真线程', updatedAt: 1, todos: [{ content: 'x', status: 'pending' }] },
+    { sessionId: '6bbb', title: '子代理卡', updatedAt: 2, todos: [{ content: 'y', status: 'pending' }] },
+  ], 100);
+  assert.equal(board.notes.length, 2);
+
+  const removed = removeNotesBySources(board, ['session-6bbb']);
+  assert.deepEqual(removed, ['子代理卡']);
+  assert.equal(board.notes.length, 1);
+  assert.equal(board.notes[0].text, '真线程');
 });

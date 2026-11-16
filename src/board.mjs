@@ -474,6 +474,27 @@ export function applyPositions(board, patches, now = Date.now()) {
   return { moved };
 }
 
+/**
+ * 按来源会话批量删卡（用来清理早期误导入的子代理卡）。
+ * 来源 id 可能带或不带 `session-` 前缀，两边都试。
+ * @returns 被删掉的便签标题
+ */
+export function removeNotesBySources(board, sessionIds) {
+  const want = new Set();
+  for (const raw of sessionIds ?? []) {
+    const id = String(raw);
+    want.add(id);
+    want.add(id.startsWith('session-') ? id.slice('session-'.length) : `session-${id}`);
+  }
+  const removed = [];
+  board.notes = board.notes.filter((n) => {
+    const src = String(n.source?.id ?? '');
+    if (src && want.has(src)) { removed.push(n.text); return false; }
+    return true;
+  });
+  return removed;
+}
+
 /** 时间戳 → 2026-11-16 14:20 */
 function fmtTime(ts) {
   if (!ts) return '—';

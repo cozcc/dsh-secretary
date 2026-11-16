@@ -45,7 +45,11 @@ const MARGIN = 40;
  * 卡片一律是「浅色面板 + 发丝线 + 极轻投影」，强调色只有品牌色一种，
  * 状态色只用来标"需要你出手 / 失败"，不参与装饰。
  */
-const ACCENT = 'var(--dsw-alias-brand-primary, #0a84ff)';
+/**
+ * 强调色写死成 iOS 蓝：主题的 brand-primary 在部分主题里接近白色，
+ * 直接用它会出现「白底白字」的过曝按钮/链接。
+ */
+const ACCENT = '#0a84ff';
 const HAIRLINE = 'var(--dsw-alias-border-l1, rgba(60,60,67,.12))';
 const TEXT_1 = 'var(--dsw-alias-label-primary, #1c1c1e)';
 const TEXT_2 = 'var(--dsw-alias-label-secondary, #6e6e73)';
@@ -116,11 +120,11 @@ const S = {
     fontWeight: 600,
   },
   toolBtnPrimary: {
-    border: '0.5px solid transparent',
+    border: `0.5px solid ${ACCENT}`,
     background: ACCENT,
     color: '#fff',
     fontWeight: 600,
-    boxShadow: '0 1px 2px rgba(0,0,0,.12)',
+    boxShadow: '0 1px 2px rgba(10,132,255,.28)',
   },
   toolBtnOff: { opacity: 0.45, cursor: 'default' },
   spacer: { flex: '1' },
@@ -1492,6 +1496,7 @@ function makeWorkspace(React, openSession) {
         if (r.created) parts.push(`新增 ${r.created}`);
         if (r.updated) parts.push(`刷新 ${r.updated}`);
         if (r.skipped) parts.push(`跳过 ${r.skipped}（你改过）`);
+        if (r.cleaned?.length) parts.push(`清掉 ${r.cleaned.length} 张子代理遗留卡`);
         if (!r.created && !r.updated && !r.skipped) parts.push('没找到带任务清单的会话');
         if (data?.truncated) parts.push('（时间到，未扫完）');
         parts.push(`用时 ${spent}s`);
