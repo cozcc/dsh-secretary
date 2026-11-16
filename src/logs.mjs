@@ -172,18 +172,33 @@ function safeJson(raw) {
 
 /**
  * 记一个任务阶段。
- * 阶段的身份只看**任务内容**，不看勾选状态：同一个任务从 pending 变 completed
- * 仍然是同一个阶段（只是把最新状态更新进去），否则每个勾选都会多出一个"阶段"。
+ *
+ * 判定「还是同一个任务」用**内容重合度**，不是全等：
+ * 同一任务在推进时经常增删条目（9 条 → 10 条、措辞微调），
+ * 全等判断会把这些都当成新任务（deepbao 曾因此出现 9 个假阶段）。
+ * 重合度 ≥ 50% 视为同一阶段，只把最新状态写回去。
  */
+const STAGE_SAME_TASK_OVERLAP = 0.5;
+
+function contentSet(items) {
+  return new Set(items.map((t) => String(t.content)));
+}
+
 function pushStage(d, todos, at) {
   if (!todos?.length) return;
   const items = todos.map((t) => ({ content: t.content, status: t.status }));
-  const key = todos.map((t) => t.content).join('|');
-  if (key === d.stageKey) {
-    d.stages[d.stages.length - 1].items = items;
-    return;
+  const current = d.stages[d.stages.length - 1];
+  if (current) {
+    const prev = contentSet(current.items);
+    const next = contentSet(items);
+    let shared = 0;
+    for (const c of next) if (prev.has(c)) shared += 1;
+    const overlap = shared / Math.max(prev.size, next.size, 1);
+    if (overlap >= STAGE_SAME_TASK_OVERLAP) {
+      current.items = items; // 同一任务：采用最新清单与状态
+      return;
+    }
   }
-  d.stageKey = key;
   d.stages.push({ at, items });
   if (d.stages.length > 20) d.stages.shift();
 }
@@ -329,7 +344,7 @@ export function digestEvents(events) {
 
 const CACHE_FILE = 'session-digests.json';
 /** 摘要格式版本：不兼容时整份缓存作废（例如解压失败曾写入空摘要）。 */
-const DIGEST_CACHE_VERSION = 3; // 3: 阶段按内容切分（旧版按状态切分，会过度切分）
+const DIGEST_CACHE_VERSION = 4; // 3: 阶段按内容切分（旧版按状态切分，会过度切分）
 
 export function loadDigestCache(dataDir) {
   try {

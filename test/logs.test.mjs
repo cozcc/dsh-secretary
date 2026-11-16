@@ -152,6 +152,8 @@ test('阶段按任务内容切分：状态变化不算新阶段', () => {
     { type: 'session', version: 4, id: 's', cwd: '/tmp' },
     call(now - 3000, [{ content: 'A', status: 'pending' }, { content: 'B', status: 'pending' }]),
     call(now - 2000, [{ content: 'A', status: 'completed' }, { content: 'B', status: 'pending' }]),
+    // 同一任务里的增删（2 条 → 3 条，2 条重合）仍然是同一阶段
+    call(now - 1500, [{ content: 'A', status: 'completed' }, { content: 'B', status: 'in_progress' }, { content: 'B2', status: 'pending' }]),
     call(now - 1000, [{ content: 'C', status: 'pending' }]),
   ];
   const d = digestEvents(events);
