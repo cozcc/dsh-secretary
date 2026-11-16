@@ -59,6 +59,9 @@ globalThis.fetch = async (url, opts = {}) => {
   const body = opts.body ? JSON.parse(opts.body) : {};
   calls.push(`${opts.method ?? 'GET'} ${route}`);
   if (route === '/board') return { ok: true, status: 200, async text() { return JSON.stringify(reply()); } };
+  if (route.startsWith('/note/export')) {
+    return { ok: true, status: 200, async text() { return '# 导出的便签\n\n- 状态：未完成\n'; } };
+  }
   if (route === '/progress') {
     return { ok: true, status: 200, async text() {
       return JSON.stringify({ progress: { running: true, phase: '解析会话日志', done: 3, total: 10, startedAt: Date.now() - 1200 } });
@@ -473,6 +476,36 @@ check('顶栏显示长期累计', text().includes('累计 1.45B') && text().incl
 // ── 待验收：徽标与顶栏计数 ─────────────────────────────
 check('卡片上有「待验收」徽标', text().includes('待验收'), text().slice(0, 120));
 check('顶栏有待验收计数', /待验收 \d+/.test(text()));
+
+
+// ── 单卡历史 / 导出 ────────────────────────────────────
+const historyBtn = [...host.querySelectorAll('button')].find((b) => /^历史 \d+$/.test((b.textContent || '').trim()));
+check('卡片有「历史 N」按钮', !!historyBtn, [...host.querySelectorAll('button')].map((b) => b.textContent).slice(0, 8).join(' | '));
+if (historyBtn) {
+  await act(async () => { historyBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
+}
+check('展开后能看到变更记录', text().includes('收起历史') || text().includes('还没有变更记录'));
+
+const exportBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '导出');
+check('卡片有「导出」按钮', !!exportBtn);
+if (exportBtn) {
+  await act(async () => { exportBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+}
+check('导出会请求 /note/export', calls.some((c) => c.startsWith('GET /note/export')), calls.slice(-3).join(' → '));
+
+// ── 默认排序：未完成在上 ────────────────────────────────
+await act(async () => {
+  const arrange = byText('自动排列');
+  if (arrange) arrange.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 200));
+});
+// 排序体现在「位置」上：按 y 再 x 还原视觉顺序
+const taskNotes = notes.filter((n) => n.kind !== 'brief');
+const visual = [...taskNotes].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+const firstDoneIndex = visual.findIndex((n) => n.done || n.cancelled);
+const lastOpenIndex = visual.map((n) => !(n.done || n.cancelled)).lastIndexOf(true);
+check('未完成的便签排在已完成的上面', firstDoneIndex === -1 || lastOpenIndex < firstDoneIndex,
+  `视觉顺序里最后一张未完成 #${lastOpenIndex}，第一张已完成 #${firstDoneIndex}`);
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

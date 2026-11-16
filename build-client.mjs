@@ -45,7 +45,7 @@ const inline = (name, file, exports) => {
 };
 
 const boardCode = inline('boardMod', 'src/board.mjs',
-  'DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions');
+  'DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions, pushHistory, noteToMarkdown, LIMITS');
 const storeCode = inline('storeMod', 'src/store.mjs', 'BoardStore, defaultDataDir');
 const logsCode = inline('logsMod', 'src/logs.mjs', 'dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, digestEvents, loadDigestCache, saveDigestCache');
 const insightsCode = inline('insightsMod', 'src/insights.mjs', 'collectPortraits');
@@ -89,7 +89,7 @@ ${briefingCode}
 
 ${httpCode}
 
-const { DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions } = boardMod;
+const { DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions, pushHistory, noteToMarkdown, LIMITS } = boardMod;
 const { BoardStore, defaultDataDir } = storeMod;
 const { dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, digestEvents, loadDigestCache, saveDigestCache } = logsMod;
 const { collectPortraits } = insightsMod;

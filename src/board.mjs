@@ -24,13 +24,35 @@ export function newId(prefix = 'n') {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** 文本长度上限，防止一条便签把文件撑爆。 */
-const MAX_TEXT = 4000;
-const MAX_UPDATE = 1000;
-const MAX_UPDATES = 200;
+/**
+ * 限额只用来兜住"异常大的输入"，不是业务裁剪：
+ * 超限时**明确报错**（HTTP 400 + 原因），不再静默截断丢掉用户内容。
+ */
+export const LIMITS = {
+  text: 100_000,       // 单张便签正文
+  update: 20_000,      // 一条进展
+  updates: 2_000,      // 每张便签的进展条数
+  todo: 2_000,         // 一条待办
+  todos: 500,          // 每张便签的待办条数
+  deliverables: 50,    // 产出文件
+  goal: 5_000,         // 任务目标
+  history: 100,        // 单卡变更历史（只保留最近，超出丢最旧并标记）
+};
 
-function clampText(value, max) {
-  return String(value ?? '').slice(0, max);
+/** 超限就抛错；不裁剪。 */
+function requireText(value, max, label) {
+  const text = String(value ?? '');
+  if (text.length > max) {
+    throw new Error(`${label}超过上限（${text.length} / ${max} 字）`);
+  }
+  return text;
+}
+
+/** 读历史数据时的兜底：只挡明显异常的（1MB 以上），不按业务上限裁。 */
+const HARD_CAP = 1_000_000;
+
+function clampRaw(value) {
+  return String(value ?? '').slice(0, HARD_CAP);
 }
 
 /** 把磁盘上读到的任意东西修成合法 board。 */
@@ -42,7 +64,7 @@ export function normalizeBoard(raw) {
     const id = typeof n.id === 'string' && n.id ? n.id : newId();
     const note = {
       id,
-      text: clampText(n.text, MAX_TEXT),
+      text: clampRaw(n.text),
       done: n.done === true,
       x: Number.isFinite(Number(n.x)) ? Number(n.x) : 40,
       y: Number.isFinite(Number(n.y)) ? Number(n.y) : 40,
@@ -62,8 +84,19 @@ export function normalizeBoard(raw) {
       review: n.review && typeof n.review === 'object'
         ? { at: Number(n.review.at) || Date.now(), seq: Number(n.review.seq) || 0 }
         : null,
+      history: [],
+      historyTruncated: false,
       brief: null,
     };
+    if (Array.isArray(n.history)) {
+      for (const h of n.history) {
+        if (!h || typeof h !== 'object') continue;
+        const kind = String(h.kind ?? '').slice(0, 40);
+        if (!kind) continue;
+        note.history.push({ at: Number(h.at) || 0, kind, text: clampRaw(h.text).slice(0, 500) });
+        if (note.history.length >= LIMITS.history) { note.historyTruncated = true; break; }
+      }
+    }
     if (n.kind === 'brief' && n.brief && typeof n.brief === 'object' && Array.isArray(n.brief.sections)) {
       note.brief = {
         date: String(n.brief.date ?? ''),
@@ -76,19 +109,19 @@ export function normalizeBoard(raw) {
     if (Array.isArray(n.todos)) {
       for (const t of n.todos) {
         if (!t || typeof t !== 'object') continue;
-        const content = clampText(t.content, 300).trim();
+        const content = clampRaw(t.content).trim();
         if (!content) continue;
         const status = t.status === 'completed' || t.status === 'in_progress' ? t.status : 'pending';
         note.todos.push({ content, status });
-        if (note.todos.length >= 50) break;
+        if (note.todos.length >= LIMITS.todos) break;
       }
     }
     if (n.source && typeof n.source === 'object' && n.source.kind === 'session' && n.source.id) {
       note.source = {
         kind: 'session',
         id: String(n.source.id),
-        title: clampText(n.source.title, 200),
-        workspace: clampText(n.source.workspace, 200),
+        title: clampRaw(n.source.title),
+        workspace: clampRaw(n.source.workspace),
         updatedAt: Number(n.source.updatedAt) || 0,
         syncedAt: Number(n.source.syncedAt) || 0,
       };
@@ -96,15 +129,29 @@ export function normalizeBoard(raw) {
     if (Array.isArray(n.updates)) {
       for (const u of n.updates) {
         if (!u || typeof u !== 'object') continue;
-        const text = clampText(u.text, MAX_UPDATE).trim();
+        const text = clampRaw(u.text).trim();
         if (!text) continue;
         note.updates.push({ id: typeof u.id === 'string' && u.id ? u.id : newId('u'), text, at: Number(u.at) || Date.now() });
-        if (note.updates.length >= MAX_UPDATES) break;
+        if (note.updates.length >= LIMITS.updates) break;
       }
     }
     board.notes.push(note);
   }
   return board;
+}
+
+/**
+ * 追加一条变更历史（只保留最近 N 条，超出丢最旧并打标记）。
+ * 目的：单卡改了什么、什么时候改的，事后可追。
+ */
+export function pushHistory(note, kind, text, now = Date.now()) {
+  if (!note.history) note.history = [];
+  note.history.push({ at: now, kind: String(kind).slice(0, 40), text: String(text ?? '').slice(0, 500) });
+  if (note.history.length > LIMITS.history) {
+    note.history.splice(0, note.history.length - LIMITS.history);
+    note.historyTruncated = true;
+  }
+  return note;
 }
 
 /** 看板统计：总数 / 已完成 / 未完成。 */
@@ -129,7 +176,7 @@ export function findNote(board, id) {
 
 /** 新增便签。位置没给就自动排到画布左上。 */
 export function addNote(board, input = {}, now = Date.now()) {
-  const text = clampText(input.text, MAX_TEXT).trim();
+  const text = requireText(input.text, LIMITS.text, '便签正文').trim();
   if (!text) throw new Error('便签内容不能为空');
   const count = board.notes.length;
   const note = {
@@ -147,6 +194,7 @@ export function addNote(board, input = {}, now = Date.now()) {
     source: input.source ?? null,
   };
   board.notes.push(note);
+  pushHistory(note, 'created', text, now);
   return note;
 }
 
@@ -158,6 +206,7 @@ export function setDone(board, id, done, now = Date.now()) {
   note.doneAt = note.done ? now : null;
   if (note.done) note.review = null;
   note.updatedAt = now;
+  pushHistory(note, note.done ? 'done' : 'undone', note.text.slice(0, 80), now);
   return note;
 }
 
@@ -166,8 +215,9 @@ export function updateNote(board, id, patch = {}, now = Date.now()) {
   const note = findNote(board, id);
   if (!note) throw new Error(`便签不存在：${id}`);
   if (patch.text !== undefined) {
-    const text = clampText(patch.text, MAX_TEXT).trim();
+    const text = requireText(patch.text, LIMITS.text, '便签正文').trim();
     if (!text) throw new Error('便签内容不能为空');
+    if (text !== note.text) pushHistory(note, 'text', `改为：${text.slice(0, 60)}`, now);
     note.text = text;
   }
   if (patch.color !== undefined && COLORS.includes(patch.color)) note.color = patch.color;
@@ -178,7 +228,9 @@ export function updateNote(board, id, patch = {}, now = Date.now()) {
     note.doneAt = note.done ? (note.doneAt ?? now) : null;
   }
   if (patch.cancelled !== undefined) {
-    note.cancelled = patch.cancelled === true;
+    const next = patch.cancelled === true;
+    if (next !== note.cancelled) pushHistory(note, next ? 'cancelled' : 'restored', note.text.slice(0, 60), now);
+    note.cancelled = next;
     if (note.cancelled) note.doneAt = null;
   }
   if (patch.review !== undefined) {
@@ -194,11 +246,14 @@ export function updateNote(board, id, patch = {}, now = Date.now()) {
 export function addUpdate(board, id, text, now = Date.now()) {
   const note = findNote(board, id);
   if (!note) throw new Error(`便签不存在：${id}`);
-  const body = clampText(text, MAX_UPDATE).trim();
+  const body = requireText(text, LIMITS.update, '进展内容').trim();
   if (!body) throw new Error('进展内容不能为空');
   const update = { id: newId('u'), text: body, at: now };
   note.updates.push(update);
-  if (note.updates.length > MAX_UPDATES) note.updates.splice(0, note.updates.length - MAX_UPDATES);
+  pushHistory(note, 'progress', body.slice(0, 120), now);
+  if (note.updates.length > LIMITS.updates) {
+    throw new Error(`进展太多（${note.updates.length} 条，上限 ${LIMITS.updates}）`);
+  }
   note.updatedAt = now;
   return update;
 }
@@ -291,6 +346,7 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
         },
       };
       board.notes.push(note);
+      pushHistory(note, 'imported', `从会话「${title}」导入 ${todos.length} 条待办`, now);
       report.created += 1;
       report.notes.push({ id: note.id, title, action: 'created' });
       continue;
@@ -334,6 +390,7 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
     existing.done = allDone;
     existing.doneAt = allDone ? (existing.doneAt ?? now) : null;
     existing.updatedAt = now;
+    pushHistory(existing, 'synced', `从会话同步 ${todos.length} 条待办`, now);
     report.updated += 1;
     report.notes.push({ id: existing.id, title, action: 'updated' });
   }
@@ -415,6 +472,60 @@ export function applyPositions(board, patches, now = Date.now()) {
     moved += 1;
   }
   return { moved };
+}
+
+/** 时间戳 → 2026-11-16 14:20 */
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return '—';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 把一张便签导出成完整的 Markdown（含历史，便于长期留档）。 */
+export function noteToMarkdown(note) {
+  if (!note) throw new Error('便签不存在');
+  const state = note.cancelled ? '已放弃' : note.done ? '已完成' : '未完成';
+  const out = [];
+  out.push(`# ${note.text.split('\n')[0].slice(0, 80) || '未命名便签'}`);
+  out.push('');
+  out.push(`- 状态：${state}`);
+  out.push(`- 创建：${fmtTime(note.createdAt)}`);
+  out.push(`- 更新：${fmtTime(note.updatedAt)}`);
+  if (note.doneAt) out.push(`- 完成：${fmtTime(note.doneAt)}`);
+  if (note.source) {
+    out.push(`- 来源线程：${note.source.title || note.source.id}${note.source.workspace ? `（${note.source.workspace}）` : ''}`);
+  }
+  out.push('');
+  out.push('## 正文');
+  out.push('');
+  out.push(note.text);
+  if (note.goal) {
+    out.push('', '## 任务目标', '', note.goal);
+  }
+  if ((note.todos ?? []).length) {
+    out.push('', '## 待办');
+    for (const t of note.todos) {
+      const mark = t.status === 'completed' ? 'x' : ' ';
+      const tag = t.status === 'in_progress' ? '（进行中）' : '';
+      out.push(`- [${mark}] ${t.content}${tag}`);
+    }
+  }
+  if ((note.updates ?? []).length) {
+    out.push('', '## 进展');
+    for (const u of note.updates) out.push(`- ${fmtTime(u.at)} ${u.text}`);
+  }
+  if ((note.deliverables ?? []).length) {
+    out.push('', '## 产出');
+    for (const f of note.deliverables) out.push(`- \`${f}\``);
+  }
+  if ((note.history ?? []).length) {
+    out.push('', `## 变更历史（最近 ${note.history.length} 条${note.historyTruncated ? '，更早的已丢弃' : ''}）`);
+    for (const h of note.history) out.push(`- ${fmtTime(h.at)} \`${h.kind}\` ${h.text}`);
+  }
+  out.push('', `---`, `导出时间：${fmtTime(Date.now())} · dsh-secretary`);
+  return `${out.join('\n')}\n`;
 }
 
 /** Agent 用的纯文本摘要。 */

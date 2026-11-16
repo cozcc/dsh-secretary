@@ -14,6 +14,8 @@ import {
   applyPositions,
   importSessions,
   normalizeBoard,
+  noteToMarkdown,
+  LIMITS,
   stats,
   addNote,
   setDone,
@@ -231,4 +233,62 @@ test('导入会话时保留任务目标与产出（续做草稿要用）', () =>
   const again = normalizeBoard(JSON.parse(JSON.stringify(board)));
   assert.equal(again.notes[0].goal, '把工作台做成助理');
   assert.equal(again.notes[0].deliverables.length, 2);
+});
+
+
+test('不再静默截断：超限明确报错，未超限一字不改', () => {
+  const board = normalizeBoard({});
+  const long = 'x'.repeat(5000); // 旧上限是 4000，现在应当完整保存
+  const note = addNote(board, { text: long }, 1);
+  assert.equal(note.text.length, 5000, '正常长度不该被裁');
+
+  const tooLong = 'y'.repeat(LIMITS.text + 1);
+  assert.throws(() => addNote(board, { text: tooLong }, 2), /超过上限/);
+  assert.throws(() => updateNote(note.id ? board : board, note.id, { text: tooLong }, 3), /超过上限/);
+
+  // 进展同样：不裁剪，超限报错
+  const n2 = addNote(board, { text: '卡' }, 4);
+  const big = 'z'.repeat(3000);
+  addUpdate(board, n2.id, big, 5);
+  assert.equal(board.notes.find((n) => n.id === n2.id).updates[0].text.length, 3000);
+  assert.throws(() => addUpdate(board, n2.id, 'w'.repeat(LIMITS.update + 1), 6), /超过上限/);
+});
+
+test('单卡变更历史：记录创建/改文本/完成/进展/取消', () => {
+  const board = normalizeBoard({});
+  const note = addNote(board, { text: '写文档' }, 1000);
+  updateNote(board, note.id, { text: '写文档 v2' }, 2000);
+  addUpdate(board, note.id, '写了一半', 3000);
+  setDone(board, note.id, true, 4000);
+  updateNote(board, note.id, { cancelled: true }, 5000);
+
+  const kinds = board.notes[0].history.map((h) => h.kind);
+  for (const k of ['created', 'text', 'progress', 'done', 'cancelled']) {
+    assert.ok(kinds.includes(k), `历史里缺 ${k}：${kinds.join(',')}`);
+  }
+  assert.equal(board.notes[0].history.at(-1).kind, 'cancelled');
+
+  // 落盘再读回来还在
+  const again = normalizeBoard(JSON.parse(JSON.stringify(board)));
+  assert.equal(again.notes[0].history.length, board.notes[0].history.length);
+});
+
+test('单卡导出 Markdown：含状态、正文、待办、进展、产出、历史', () => {
+  const board = normalizeBoard({});
+  importSessions(board, [{
+    sessionId: 's9', title: '导出测试', updatedAt: 10, goal: '把导出做出来',
+    deliverables: ['/tmp/a.md'], todos: [{ content: '写导出', status: 'completed' }, { content: '补测试', status: 'pending' }],
+  }], 1000);
+  const note = board.notes[0];
+  addUpdate(board, note.id, '写完了导出', 2000);
+  const md = noteToMarkdown(note);
+
+  assert.match(md, /^# 导出测试/m);
+  assert.match(md, /状态：未完成/);
+  assert.match(md, /## 任务目标[\s\S]*把导出做出来/);
+  assert.match(md, /- \[x\] 写导出/);
+  assert.match(md, /- \[ \] 补测试/);
+  assert.match(md, /## 进展[\s\S]*写完了导出/);
+  assert.match(md, /## 产出[\s\S]*\/tmp\/a\.md/);
+  assert.match(md, /## 变更历史/);
 });

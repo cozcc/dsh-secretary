@@ -13,8 +13,11 @@
 - Tick the circle to finish a note (strikethrough + dimmed card); tick again to undo
 - Log progress on unfinished notes; drag cards; drop on the trash can to delete
 - Cards grow with their content — no inner scrollbars
+- Long text is stored **verbatim**: exceeding a very high limit returns an explicit error instead of silently trimming
+- Each card keeps a **change history** (created / text / progress / done / cancelled, last 100) and can be **exported as Markdown** with that history
 - Layout is packed by **measured card height**; rows wrap at the **visible right edge** (no horizontal scrolling), newest card top-left
-- `自动排列` re-flows everything newest-first: left → right, wrap, then next row
+- Default order puts **unfinished cards first**, then completed, then abandoned; inside a group the newest comes first
+- `自动排列` re-applies that order: left → right, wrap, then next row
 - Unified Apple-Notes-style palette: white cards on a light canvas, one accent colour, no per-note colours
 
 ### 2. Session cards pulled from DSH threads

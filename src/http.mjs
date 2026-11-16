@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { stats, importSessions, applyPositions } from './board.mjs';
+import { stats, importSessions, applyPositions, findNote, noteToMarkdown } from './board.mjs';
 import { scanSessions } from './sessions.mjs';
 import { readSettings, writeSettings } from './settings.mjs';
 import { runBrief } from './briefing.mjs';
@@ -145,6 +145,21 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
             if (route === '/cumulative' && method === 'GET') {
               return json(res, 200, { totals: ledgerTotals(loadLedger(dataDir)) });
             }
+            if (route === '/note/export' && method === 'GET') {
+              const q = readQuery(url);
+              const note = findNote(store.read(), String(q.id ?? ''));
+              if (!note) return json(res, 404, { error: '便签不存在' });
+              if (String(q.format ?? 'md') === 'json') return json(res, 200, { note });
+              const md = noteToMarkdown(note);
+              res.writeHead(200, {
+                'Content-Type': 'text/markdown; charset=utf-8',
+                'Content-Disposition': `attachment; filename="note-${note.id}.md"`,
+                'Cache-Control': 'no-store',
+              });
+              res.end(md);
+              return undefined;
+            }
+
             if (route === '/briefs' && method === 'GET') {
               return json(res, 200, {
                 briefs: listBriefs(dataDir, { limit: 30 }).map((b) => ({
