@@ -92,3 +92,39 @@ test('有 owner 身份时改设置成功', async () => {
   assert.equal(r.body.settings.dailyTime, '07:30');
   assert.equal(r.body.settings.retentionDays, 30);
 });
+
+
+test('导出与历史路由：md 导出、404、按日期取快照', async () => {
+  const s = makeServer({ admit: () => ownerPeer });
+
+  // 先建一张卡
+  const created = await s.call('POST', '/workbench/api/note', { 'content-type': 'application/json' }, { text: '导出测试' });
+  assert.equal(created.status, 200);
+  const id = created.body.board.notes.find((n) => n.text === '导出测试').id;
+
+  const md = await s.call('GET', `/workbench/api/note/export?id=${id}&format=md`, {});
+  assert.equal(md.status, 200);
+  assert.match(md.body.raw ?? '', /状态：未完成/);
+  assert.match(md.body.raw ?? '', /## 变更历史/);
+
+  const missing = await s.call('GET', '/workbench/api/note/export?id=nope', {});
+  assert.equal(missing.status, 404);
+
+  // 超长正文：400 且明确指出超限
+  const tooLong = await s.call('POST', '/workbench/api/note', { 'content-type': 'application/json' }, { text: 'x'.repeat(100_001) });
+  assert.equal(tooLong.status, 400);
+  assert.match(tooLong.body.error, /超过上限/);
+
+  // 按日期取简报：没有就是 404（顺带覆盖 readQuery）
+  const brief = await s.call('GET', '/workbench/api/brief?date=2020-01-01', {});
+  assert.equal(brief.status, 404);
+});
+
+test('新建的便签自带变更历史', async () => {
+  const s = makeServer({ admit: () => ownerPeer });
+  await s.call('POST', '/workbench/api/note', { 'content-type': 'application/json' }, { text: '带历史' });
+  const board = s.store.read();
+  const note = board.notes.find((n) => n.text === '带历史');
+  assert.ok(note.history.length >= 1);
+  assert.equal(note.history[0].kind, 'created');
+});
