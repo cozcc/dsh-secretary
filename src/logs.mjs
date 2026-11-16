@@ -170,6 +170,16 @@ function safeJson(raw) {
   }
 }
 
+/** 记一个任务阶段（连续相同的清单不重复记）。 */
+function pushStage(d, todos, at) {
+  if (!todos?.length) return;
+  const key = todos.map((t) => `${t.content}::${t.status}`).join('|');
+  if (key === d.stageKey) return;
+  d.stageKey = key;
+  d.stages.push({ at, items: todos.map((t) => ({ content: t.content, status: t.status })) });
+  if (d.stages.length > 20) d.stages.shift();
+}
+
 function parseTodos(raw) {
   const args = safeJson(raw);
   const list = Array.isArray(args?.todos) ? args.todos : null;
@@ -205,6 +215,7 @@ export function digestEvents(events) {
     goal: null,
     todos: null,
     todosAt: 0,
+    stages: [],        // [{ at, items: [{content,status}] }] 同一线程里的连续任务
     deliverables: [],
     lastTools: [],
     turns: 0,
@@ -281,7 +292,7 @@ export function digestEvents(events) {
 
         if (name === 'todo_write') {
           const todos = parseTodos(block.arguments);
-          if (todos) { d.todos = todos; d.todosAt = time; }
+          if (todos) { d.todos = todos; d.todosAt = time; pushStage(d, todos, time); }
         } else if (name === 'create_goal') {
           const args = safeJson(block.arguments);
           if (args?.objective) d.goal = { objective: String(args.objective).slice(0, 500), status: 'active' };

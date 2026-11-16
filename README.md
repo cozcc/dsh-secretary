@@ -28,6 +28,7 @@
   - **刷新** — re-pull only this thread
   - **取消** — abandon the task: excluded from "open", never resurrected by later pulls, restorable anytime
 - Deduplicated by source session; cards you edited are never overwritten (system fields such as goal/deliverables are still back-filled)
+- **One card per thread**: when a thread moves on to a new task, the card follows the thread's new title and keeps every earlier task stage — the badge reads `第 N 个任务`, and the history panel lists each stage's checklist. Your own renames are never overwritten
 
 ### 3. Briefings
 - `生成简报` produces a briefing card on the canvas: last 24h overview, **needs your attention**, in progress, completed, token cost, long-term totals

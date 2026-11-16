@@ -308,3 +308,34 @@ test('按来源清理：子代理遗留卡会被删掉（带/不带 session- 前
   assert.equal(board.notes.length, 1);
   assert.equal(board.notes[0].text, '真线程');
 });
+
+
+test('同一线程的连续任务：阶段全部保留，标题跟随但不动手改名', () => {
+  const board = normalizeBoard({});
+  const stage1 = [{ at: 1, items: [{ content: '任务A-1', status: 'completed' }, { content: '任务A-2', status: 'completed' }] }];
+  const stage2 = [...stage1, { at: 2, items: [{ content: '任务B-1', status: 'pending' }] }];
+
+  importSessions(board, [{
+    sessionId: 's1', title: '线程原标题', updatedAt: 10,
+    todos: [{ content: '任务B-1', status: 'pending' }], stages: stage1,
+  }], 100);
+  const note = board.notes[0];
+  assert.equal(note.stages.length, 1);
+
+  // 线程继续做第二个任务：阶段追加、标题跟随
+  importSessions(board, [{
+    sessionId: 's1', title: '线程新标题', updatedAt: 20,
+    todos: [{ content: '任务B-1', status: 'pending' }], stages: stage2,
+  }], 3000);
+  assert.equal(board.notes.length, 1, '仍然一张卡，不新增');
+  assert.equal(board.notes[0].stages.length, 2, '两个阶段都留着');
+  assert.equal(board.notes[0].text, '线程新标题', '没手改过标题时跟随线程');
+
+  // 手动改过标题后，再同步不应该覆盖
+  updateNote(board, note.id, { text: '我自己起的名' }, 4000);
+  importSessions(board, [{
+    sessionId: 's1', title: '线程第三个标题', updatedAt: 30,
+    todos: [{ content: '任务B-1', status: 'pending' }], stages: stage2,
+  }], 5000);
+  assert.equal(board.notes[0].text, '我自己起的名', '手改的标题不被覆盖');
+});

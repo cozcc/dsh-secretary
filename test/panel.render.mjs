@@ -342,6 +342,10 @@ notes.push({
     { content: '补测试', status: 'pending' },
   ],
   goal: '把工作台做成 DSH 助理',
+  stages: [
+    { at: Date.now() - 7200e3, items: [{ content: '任务A-1', status: 'completed' }] },
+    { at: Date.now() - 3600e3, items: [{ content: '加自动排列', status: 'completed' }, { content: '加会话导入', status: 'in_progress' }] },
+  ],
   deliverables: ['/tmp/report.md'],
   source: { kind: 'session', id: 'sess-1', title: '工作台插件开发', workspace: 'Playground', updatedAt: Date.now(), syncedAt: Date.now() },
 });
@@ -539,6 +543,16 @@ const firstDoneIndex = visual.findIndex((n) => n.done || n.cancelled);
 const lastOpenIndex = visual.map((n) => !(n.done || n.cancelled)).lastIndexOf(true);
 check('未完成的便签排在已完成的上面', firstDoneIndex === -1 || lastOpenIndex < firstDoneIndex,
   `视觉顺序里最后一张未完成 #${lastOpenIndex}，第一张已完成 #${firstDoneIndex}`);
+
+
+// ── 一个线程多个任务：卡上标注第 N 个，历史里列出各阶段──
+check('卡片标注「第 N 个任务」', /第 2 个任务/.test(text()), text().slice(0, 120));
+const stageCard = [...host.querySelectorAll('div[data-note-id]')].find((el) => /第 2 个任务/.test(el.textContent || ''));
+const histBtn2 = stageCard && [...stageCard.querySelectorAll('button')].find((b) => /^历史 \d+$/.test((b.textContent || '').trim()));
+if (histBtn2) {
+  await act(async () => { histBtn2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 100)); });
+}
+check('历史里能看到各阶段清单', text().includes('第 1 个任务 · 1/1') && text().includes('第 2 个任务 · 1/2'), text().slice(-200));
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

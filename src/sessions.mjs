@@ -39,6 +39,7 @@ export async function scanSessions({ ctx, dataDir, log, limit = 60, budgetMs = 2
       createdAt: p.createdAt,
       updatedAt: p.updatedAt,
       todos: p.todos,
+      stages: p.stages ?? [],
       goal: p.goal?.objective ?? null,
       deliverables: p.deliverables ?? [],
     }));

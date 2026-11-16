@@ -154,6 +154,7 @@ export async function collectPortraits({
       failure,
       goal: goal ? { objective: goal.objective, status: goal.status ?? 'active' } : null,
       todos,
+      stages: digest.stages ?? [],
       todosDone,
       todosOpen,
       turns: digest.turns ?? 0,
