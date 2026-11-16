@@ -869,6 +869,12 @@ function makeNote(React, api, onBoard) {
             h('button', {
               type: 'button',
               style: { ...S.actionBtn, ...S.actionBtnPrimary },
+              title: '打开这个线程的对话',
+              onClick: (e) => { e.stopPropagation(); onOpenSession?.(note.source.id); },
+            }, '打开线程'),
+            h('button', {
+              type: 'button',
+              style: S.actionBtn,
               title: '复制续做草稿（目标/未完成/进展/产出）并打开这个线程',
               onClick: (e) => { e.stopPropagation(); onContinue?.(note); },
             }, '继续'),
@@ -1351,7 +1357,8 @@ function makeWorkspace(React, openSession) {
       if (!sessionId) return;
       const draft = buildDraft(note);
       const copied = await copyText(draft);
-      openSession?.(sessionId);
+      const jumped = openSession?.(sessionId);
+      if (jumped === false) setToast('当前环境不支持跳转，已只复制草稿');
       if (copied) setToast('续做草稿已复制 · 在会话输入框粘贴即可');
       else setDraftFallback(draft);
     };
@@ -1746,7 +1753,7 @@ function makeWorkspace(React, openSession) {
             drag: drag && drag.id === n.id ? drag : null,
             dragHot,
             autoEdit: autoEditId === n.id,
-            onOpenSession: openSession,
+            onOpenSession: (id) => { if (openSession?.(id) === false) setToast('当前环境不支持跳转'); },
             onRefresh: refreshCard,
             onCancel: cancelCard,
             onContinue: continueTask,
@@ -1930,10 +1937,12 @@ async function copyText(text) {
  * 正好是一次界面导航。服务不存在时退化成提示，不报错。
  */
 function makeNavigator(ctx) {
-  const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined;
-  const layout = typeof ctx.get === 'function' ? ctx.get('layout') : undefined;
+  const grab = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined);
   return (sessionId) => {
     if (!sessionId) return false;
+    // 每次点击时再取服务：插件可能先于 uiWorkspace 加载，apply 时取会拿到 undefined
+    const uiWorkspace = grab('uiWorkspace');
+    const layout = grab('layout');
     try {
       if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
         uiWorkspace.openSession(sessionId);
@@ -1944,7 +1953,7 @@ function makeNavigator(ctx) {
         return true;
       }
     } catch (error) {
-      console.error('[workbench] 打开会话失败', error);
+      console.error('[secretary] 打开会话失败', error);
     }
     return false;
   };

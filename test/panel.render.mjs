@@ -484,6 +484,13 @@ check('恢复后不再是已放弃', !notes.some((n) => n.cancelled));
 // ── 继续：复制续做草稿并打开会话 ────────────────────────
 const continueBtn = [...host.querySelectorAll('button')].find((b) => b.textContent === '继续');
 check('会话卡有「继续」', !!continueBtn);
+const openBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '打开线程');
+check('会话卡有「打开线程」按钮', !!openBtn);
+const openedBeforeOpen = opened.length;
+if (openBtn) {
+  await act(async () => { openBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
+}
+check('点「打开线程」会跳转', opened.length > openedBeforeOpen, JSON.stringify(opened.slice(-2)));
 const openedBefore = opened.length;
 if (continueBtn) {
   await act(async () => { continueBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
