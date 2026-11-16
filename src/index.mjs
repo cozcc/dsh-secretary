@@ -31,7 +31,7 @@ export function apply(ctx, rawConfig = {}) {
   const dataDir = rawConfig && typeof rawConfig.dataDir === 'string' && rawConfig.dataDir
     ? rawConfig.dataDir
     : defaultDataDir();
-  const log = (msg) => console.log(`[workbench] ${msg}`);
+  const log = (msg) => console.log(`[secretary] ${msg}`);
   const store = new BoardStore(dataDir);
 
   ctx.effect(() => {

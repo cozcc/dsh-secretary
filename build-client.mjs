@@ -33,6 +33,18 @@ fs.writeFileSync(
 // 少一个相对路径模块就少一类「装上了但没生效」的可能。
 // 内联条件：这三个文件只用 node: 内置模块，互不循环依赖。
 const inline = (name, file, exports) => {
+  // 校验：这里声明的导出必须真的在源文件里 export 过，否则运行时会 TDZ/undefined
+  const source = read(file);
+  for (const raw of exports.split(',')) {
+    const symbol = raw.trim();
+    if (!symbol) continue;
+    const declared = new RegExp(`export\\s+(async\\s+)?(function|const|let|class)\\s+${symbol}\\b`).test(source)
+      || new RegExp(`export\\s*\\{[^}]*\\b${symbol}\\b`).test(source);
+    if (!declared) {
+      console.error(`✗ ${file} 没有导出 ${symbol}（build-client.mjs 的清单过期了）`);
+      process.exit(1);
+    }
+  }
   const body = read(file)
     .replace(/^import\s[\s\S]*?from\s+'[^']+';?\n/gm, '')
     .split('\n')
@@ -51,7 +63,7 @@ const logsCode = inline('logsMod', 'src/logs.mjs', 'dshHome, decodeFrames, decod
 const insightsCode = inline('insightsMod', 'src/insights.mjs', 'collectPortraits');
 const sessionsCode = inline('sessionsMod', 'src/sessions.mjs', 'scanSessions, parseTodoArguments');
 const cumulativeCode = inline('cumulativeMod', 'src/cumulative.mjs', 'emptyLedger, loadLedger, saveLedger, isIngested, ingest, totals, dailySeries');
-const pricingCode = inline('pricingMod', 'src/pricing.mjs', 'PRICES, priceTierOf, isPeak, usageCost, fmtTokens, fmtUsd, sumUsage');
+const pricingCode = inline('pricingMod', 'src/pricing.mjs', 'fmtTokens, sumUsage');
 const briefCode = inline('briefMod', 'src/brief.mjs', 'composeBrief, briefText, dateKey, saveBrief, pruneBriefs, listBriefs, readBrief');
 const settingsCode = inline('settingsMod', 'src/settings.mjs', 'DEFAULT_SETTINGS, readSettings, writeSettings, sanitize');
 const briefingCode = inline('briefingMod', 'src/briefing.mjs', 'runBrief, runScheduledBrief');
@@ -95,7 +107,7 @@ const { dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspace
 const { collectPortraits } = insightsMod;
 const { scanSessions, parseTodoArguments } = sessionsMod;
 const { emptyLedger, loadLedger, saveLedger, isIngested, ingest, totals: ledgerTotals, dailySeries } = cumulativeMod;
-const { PRICES, priceTierOf, isPeak, usageCost, fmtTokens, fmtUsd, sumUsage } = pricingMod;
+const { fmtTokens, sumUsage } = pricingMod;
 const { composeBrief, briefText, dateKey, saveBrief, pruneBriefs, listBriefs, readBrief } = briefMod;
 const { DEFAULT_SETTINGS, readSettings, writeSettings, sanitize } = settingsMod;
 const { runBrief, runScheduledBrief } = briefingMod;
