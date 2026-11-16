@@ -180,7 +180,9 @@ await act(async () => { byText('只看没做完').click(); await new Promise((r)
 check('筛选后两张都收起，提示没有没做完的', text().includes('没有没做完的了'), text().slice(0, 160));
 
 // 取消筛选
-await act(async () => { byText('已隐藏 2').click(); await new Promise((r) => setTimeout(r, 30)); });
+const showAllBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').includes('隐藏 2'));
+check('筛选按钮显示隐藏张数', !!showAllBtn, [...host.querySelectorAll('button')].map((b) => b.textContent).slice(0, 6).join(' | '));
+await act(async () => { showAllBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 30)); });
 check('再点恢复显示', text().includes('写周报') && text().includes('回邮件'));
 
 // 新建便签：应自动进入编辑态（出现 textarea）

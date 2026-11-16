@@ -71,27 +71,58 @@ const S = {
   topbar: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
-    padding: '0 16px',
-    height: '44px',
+    gap: '10px',
+    padding: '0 18px',
+    height: '54px',
     flex: 'none',
     boxSizing: 'border-box',
     background: 'var(--dsw-alias-bg-layer-1, #fff)',
     borderBottom: `0.5px solid ${HAIRLINE}`,
   },
-  title: { fontSize: '15px', fontWeight: 700, letterSpacing: '-0.01em' },
+  title: { fontSize: '17px', fontWeight: 700, letterSpacing: '-0.02em' },
   chip: {
     display: 'inline-flex',
     alignItems: 'center',
-    height: '22px',
-    padding: '0 8px',
-    borderRadius: '6px',
-    fontSize: '11px',
+    height: '26px',
+    padding: '0 10px',
+    borderRadius: '7px',
+    fontSize: '12px',
     fontVariantNumeric: 'tabular-nums',
     whiteSpace: 'nowrap',
     background: INSET,
     color: TEXT_2,
   },
+
+  /* 工具栏按钮：备忘录那种大一号的胶囊按钮 */
+  toolBtn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '30px',
+    padding: '0 14px',
+    borderRadius: '8px',
+    border: `0.5px solid ${HAIRLINE}`,
+    background: 'transparent',
+    color: TEXT_1,
+    fontSize: '13px',
+    fontFamily: 'inherit',
+    lineHeight: '30px',
+    whiteSpace: 'nowrap',
+    cursor: 'pointer',
+  },
+  toolBtnOn: {
+    background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.14))',
+    borderColor: 'transparent',
+    fontWeight: 600,
+  },
+  toolBtnPrimary: {
+    border: '0.5px solid transparent',
+    background: ACCENT,
+    color: '#fff',
+    fontWeight: 600,
+    boxShadow: '0 1px 2px rgba(0,0,0,.12)',
+  },
+  toolBtnOff: { opacity: 0.45, cursor: 'default' },
   spacer: { flex: '1' },
   hint: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
 
@@ -415,13 +446,13 @@ const S = {
   settingsHint: { fontSize: '11px', lineHeight: '16px', color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
 
   tabs: {
-    display: 'flex', gap: '2px', padding: '2px', borderRadius: '8px',
+    display: 'flex', gap: '2px', padding: '3px', borderRadius: '10px',
     background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.10))', flex: 'none',
   },
   tab: {
-    height: '24px', padding: '0 12px', border: '0', borderRadius: '6px', cursor: 'pointer',
+    height: '30px', padding: '0 16px', border: '0', borderRadius: '8px', cursor: 'pointer',
     background: 'transparent', color: 'var(--dsw-alias-label-secondary, #8e8e93)',
-    fontSize: '12px', fontFamily: 'inherit', lineHeight: '24px',
+    fontSize: '13px', fontFamily: 'inherit', lineHeight: '30px', fontWeight: 500,
   },
   tabActive: {
     background: CARD, color: TEXT_1, fontWeight: 600,
@@ -1605,14 +1636,14 @@ function makeWorkspace(React, openSession) {
           }, '简报')),
 
         tab === 'notes'
-          ? h('span', { style: { ...S.chip, background: 'var(--dsw-alias-fill-l2, rgba(0,0,0,.06))' } }, `没做完 ${open}`)
+          ? h('span', { style: S.chip }, `没做完 ${open}`)
           : null,
         tab === 'notes'
           ? h('span', { style: { ...S.chip, background: 'rgba(63,157,82,.14)', color: '#2f7d40' } }, `已完成 ${done}${total ? ` · ${pct}%` : ''}`)
           : null,
         tab === 'notes' && reviewCount
           ? h('span', {
-            style: { ...S.chip, color: 'var(--dsw-alias-state-success-primary, #34c759)' },
+            style: { ...S.chip, background: 'rgba(52,199,89,.14)', color: 'var(--dsw-alias-state-success-primary, #34c759)' },
             title: '有线程刚跑完一轮，等你验收（点卡片上的「待验收」即可）',
           }, `待验收 ${reviewCount}`)
           : null,
@@ -1621,7 +1652,7 @@ function makeWorkspace(React, openSession) {
           : null,
         cumulative
           ? h('span', {
-            style: { ...S.chip, color: 'var(--dsw-alias-label-secondary, #8e8e93)' },
+            style: S.chip,
             title: `长期累计：${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天${cumulative.firstDay ? `（${cumulative.firstDay} 起）` : ''}`,
           }, `累计 ${fmtTokens(cumulative.tokens)} · ${fmtUsd(cumulative.usd)}`)
           : null,
@@ -1632,31 +1663,16 @@ function makeWorkspace(React, openSession) {
             type: 'button',
             onClick: () => setHideDone((v) => !v),
             title: hideDone ? '显示已完成的便签' : '收起已完成的便签',
-            style: {
-              ...S.chip,
-              cursor: 'pointer',
-              lineHeight: '18px',
-              border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-              background: hideDone ? 'rgba(63,157,82,.16)' : 'transparent',
-              color: 'inherit',
-            },
-          }, hideDone ? `只看没做完 · 已隐藏 ${done}` : '只看没做完')
+            style: { ...S.toolBtn, ...(hideDone ? S.toolBtnOn : {}) },
+          }, hideDone ? `只看没做完 · 隐藏 ${done}` : '只看没做完')
           : null,
         tab === 'notes'
           ? h('button', {
             type: 'button',
             onClick: autoArrange,
             disabled: busyArranging || total === 0,
-            title: '把所有便签按网格重新排好，铺满一行自动换行',
-            style: {
-              ...S.chip,
-              cursor: busyArranging || total === 0 ? 'default' : 'pointer',
-              lineHeight: '18px',
-              opacity: busyArranging || total === 0 ? 0.5 : 1,
-              border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-              background: 'transparent',
-              color: 'inherit',
-            },
+            title: '把所有便签重新排好：未完成在上，一行铺满再换行',
+            style: { ...S.toolBtn, ...(busyArranging || total === 0 ? S.toolBtnOff : {}) },
           }, busyArranging ? '排列中…' : '自动排列')
           : null,
         tab === 'notes'
@@ -1664,62 +1680,32 @@ function makeWorkspace(React, openSession) {
             type: 'button',
             onClick: importSessions,
             disabled: busyImporting,
-            title: '扫描所有工作区的线程，把每个会话最后的待办清单拉成便签（按会话去重，不动你改过的卡）',
-            style: {
-              ...S.chip,
-              cursor: busyImporting ? 'default' : 'pointer',
-              lineHeight: '18px',
-              opacity: busyImporting ? 0.5 : 1,
-              border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-              background: 'transparent',
-              color: 'inherit',
-            },
+            title: '扫描所有工作区的线程，把每个会话最后的待办清单拉成便签',
+            style: { ...S.toolBtn, ...(busyImporting ? S.toolBtnOff : {}) },
           }, busyImporting ? '拉取中…' : '拉取线程任务')
           : null,
         h('button', {
           type: 'button',
           onClick: generateBrief,
           disabled: busyBrief,
-          title: '扫一遍所有会话，生成一份助理简报（目标/进展/待办/消耗/需要你出手的事）',
-          style: {
-            ...S.chip,
-            cursor: busyBrief ? 'default' : 'pointer',
-            lineHeight: '18px',
-            opacity: busyBrief ? 0.5 : 1,
-            border: '0.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.16))',
-            background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.10))',
-            color: 'inherit',
-            fontWeight: 600,
-          },
+          title: '扫一遍所有会话，生成一份助理简报',
+          style: { ...S.toolBtn, ...S.toolBtnPrimary, ...(busyBrief ? S.toolBtnOff : {}) },
         }, busyBrief ? '生成中…' : '生成简报'),
         h('button', {
           type: 'button',
           onClick: () => setShowSettings((v) => !v),
           title: '简报设置：每天几点生成、快照保留多久',
-          style: {
-            ...S.chip,
-            cursor: 'pointer',
-            lineHeight: '18px',
-            border: '0.5px solid var(--dsw-alias-border-l1, rgba(0,0,0,.12))',
-            background: showSettings ? 'var(--dsw-alias-fill-l2, rgba(0,0,0,.06))' : 'transparent',
-            color: 'inherit',
-          },
+          style: { ...S.toolBtn, ...(showSettings ? S.toolBtnOn : {}) },
         }, '设置'),
-        tab === 'notes'
-          ? h('span', { style: S.hint }, '双击空白新建')
-          : null,
         tab === 'notes'
           ? h('button', {
             type: 'button',
             onClick: createNote,
-            style: {
-              height: '26px', padding: '0 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px',
-              border: '0.5px solid var(--dsw-alias-border-l2, rgba(0,0,0,.16))',
-              background: 'var(--dsw-specific-menu, rgba(0,0,0,.04))',
-              color: 'inherit',
-            },
+            title: '新建一张便签',
+            style: { ...S.toolBtn, ...S.toolBtnPrimary },
           }, '＋ 新建便签')
           : null),
+
 
       tab === 'brief'
         ? h(BriefPage, {

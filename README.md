@@ -18,7 +18,7 @@
 - Layout is packed by **measured card height**; rows wrap at the **visible right edge** (no horizontal scrolling), newest card top-left
 - Default order puts **unfinished cards first**, then completed, then abandoned; inside a group the newest comes first
 - `自动排列` re-applies that order: left → right, wrap, then next row
-- Unified Apple-Notes-style palette: white cards on a light canvas, one accent colour, no per-note colours
+- Unified Apple-Notes-style palette and toolbar: white cards on a light canvas, one accent colour, 30px toolbar buttons
 
 ### 2. Session cards pulled from DSH threads
 - `拉取线程任务` scans **every workspace** and turns each thread's last `todo_write` list into a card
