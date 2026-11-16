@@ -199,3 +199,20 @@ test('长期累计：简报里出现「长期累计」块', () => {
   assert.match(block.lines[0].text, /累计 1\.45B tokens · \$19\.48/);
   assert.match(block.lines[1].text, /150 个线程 · 覆盖 30 天/);
 });
+
+
+test('子代理线程不进简报、不计入本期消耗', () => {
+  const portraits = [
+    { sessionId: 'w1', isSubagent: true, title: 'You are a READ-ONLY evidence', workspace: 'P', status: 'active',
+      activeInWindow: true, todos: [], todosOpen: 0, recentTools: ['read'], deliverables: [],
+      usage: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0, usd: 1, totalTokens: 1100 }, idleDays: 0 },
+    { sessionId: 'm1', isSubagent: false, title: '真实线程', workspace: 'P', status: 'active',
+      activeInWindow: true, todos: [], todosOpen: 0, recentTools: ['bash'], deliverables: [],
+      usage: { inputTokens: 500, outputTokens: 50, cacheReadTokens: 0, usd: 0.5, totalTokens: 550 }, idleDays: 0 },
+  ];
+  const brief = composeBrief(portraits, { sinceMs: Date.now() - 3600e3 });
+  assert.equal(brief.totals.sessions, 1, '子代理不算一个会话');
+  assert.ok(Math.abs(brief.totals.tokens.usd - 0.5) < 1e-9, `本期费用只算真线程：${brief.totals.tokens.usd}`);
+  const text = briefText(brief);
+  assert.ok(!text.includes('READ-ONLY'), '子代理不该出现在简报里');
+});

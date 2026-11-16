@@ -89,6 +89,9 @@ export async function collectPortraits({
     }
 
     const sessionId = digest.sessionId || entry.sessionId;
+    // 子代理线程（我派出去的 worker）不是"你的任务"：卡面和简报都不该出现它们，
+    // 但它们的花费是真的，仍然计入长期累计。
+    const isSubagent = digest.origin === 'subagent' || Boolean(digest.parentSession);
     const workspace = workspaces.get(sessionId) ?? workspaces.get(entry.sessionId);
     const updatedAt = Number(entry.mtimeMs) || digest.lastActivity || 0;
     const recentActive = updatedAt >= sinceMs || (digest.lastActivity || 0) >= sinceMs;
@@ -138,6 +141,7 @@ export async function collectPortraits({
 
     portraits.push({
       sessionId,
+      isSubagent,
       title,
       workspace: workspace?.title ?? '',
       workspaceId: workspace?.id ?? '',

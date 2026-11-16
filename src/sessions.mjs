@@ -29,6 +29,7 @@ export async function scanSessions({ ctx, dataDir, log, limit = 60, budgetMs = 2
   if (result.error) return { sessions: [], scanned: 0, truncated: false, error: result.error };
 
   const sessions = result.portraits
+    .filter((p) => !p.isSubagent)
     .filter((p) => p.todos.length)
     .map((p) => ({
       sessionId: p.sessionId,

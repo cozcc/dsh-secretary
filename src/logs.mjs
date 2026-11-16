@@ -200,6 +200,8 @@ export function digestEvents(events, { costOf }) {
     sessionId: '',
     cwd: '',
     createdAt: 0,
+    origin: '',
+    parentSession: '',
     title: '',
     goal: null,
     todos: null,
@@ -226,6 +228,8 @@ export function digestEvents(events, { costOf }) {
       if (data.id) d.sessionId = String(data.id);
       if (data.cwd) d.cwd = String(data.cwd);
       if (data.createdAt) d.createdAt = Number(data.createdAt);
+      if (data.origin) d.origin = String(data.origin);
+      if (data.parentSession) d.parentSession = String(data.parentSession);
       continue;
     }
 

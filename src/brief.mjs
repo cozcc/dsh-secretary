@@ -72,7 +72,8 @@ function itemLines(portrait) {
  * @param {object} opts { sinceMs, now, scanInfo }
  */
 export function composeBrief(portraits, { sinceMs, now = Date.now(), scanInfo = {}, cumulative = null } = {}) {
-  const list = portraits ?? [];
+  // 子代理线程（worker）不算"你的任务"，不计入卡面与本期消耗
+  const list = (portraits ?? []).filter((p) => !p.isSubagent);
   const active = list.filter((p) => p.activeInWindow || p.running || p.waiting);
   const done = list.filter((p) => p.status === 'done' || p.goal?.status === 'done');
   const failed = list.filter((p) => p.status === 'failed');

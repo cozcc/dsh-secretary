@@ -30,7 +30,9 @@ export function priceTierOf(model) {
 
 /** 某个时刻是否按高峰计价（UTC 工作日 01–04、06–10 点）。 */
 export function isPeak(timeMs) {
-  const d = new Date(Number(timeMs) || Date.now());
+  // 注意：不要写 `Number(timeMs) || Date.now()`——0 是合法时间戳，会被误当成"没传"
+  const t = Number(timeMs);
+  const d = new Date(Number.isFinite(t) ? t : Date.now());
   const day = d.getUTCDay(); // 0=周日
   if (day === 0 || day === 6) return false;
   const hour = d.getUTCHours();
