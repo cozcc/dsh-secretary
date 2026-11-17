@@ -161,3 +161,29 @@ test('阶段按任务内容切分：状态变化不算新阶段', () => {
   assert.equal(d.stages[0].items[0].status, 'completed', '同一阶段保留最新状态');
   assert.equal(d.stages[1].items[0].content, 'C');
 });
+
+
+test('阶段：首条任务没变但后续被改写，仍算同一阶段', () => {
+  const now = Date.now();
+  const usage = { inputTokens: 10, outputTokens: 1, cacheReadTokens: 0 };
+  const call = (at, todos) => ({
+    type: 'assistant/message', time: at,
+    data: { usage, message: { role: 'assistant', source: { kind: 'model', provider: 'p', model: 'm' },
+      content: [{ type: 'tool-call', id: 'c', name: 'todo_write', arguments: JSON.stringify({ todos }) }] } },
+  });
+  const d = digestEvents([
+    { type: 'session', version: 4, id: 's', cwd: '/tmp' },
+    call(now - 2000, [
+      { content: '读插件源码，摸清插槽', status: 'pending' },
+      { content: '确定检测信号（虚拟屏）', status: 'pending' },
+      { content: '实现适配插件', status: 'pending' },
+    ]),
+    call(now - 1000, [
+      { content: '读插件源码，摸清插槽', status: 'completed' },
+      { content: '确定检测信号（日志连接事件）', status: 'completed' },
+      { content: '实现适配插件 + 侧栏按钮', status: 'in_progress' },
+    ]),
+  ]);
+  assert.equal(d.stages.length, 1, `首条相同应视为同一任务，实际 ${d.stages.length}`);
+  assert.equal(d.stages[0].items[2].status, 'in_progress', '保留最新状态');
+});

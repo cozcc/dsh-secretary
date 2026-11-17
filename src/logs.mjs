@@ -180,6 +180,11 @@ function safeJson(raw) {
  */
 const STAGE_SAME_TASK_OVERLAP = 0.5;
 
+/** 归一化：去掉空白与标点，用于判断「首条任务是否还是同一个」。 */
+function normalizeTask(text) {
+  return String(text ?? '').toLowerCase().replace(/[\s`~!@#$%^&*()_+\-={}\[\]|\\:;"'<>,.?/，。；：！？、（）【】《》""'']/g, '');
+}
+
 function contentSet(items) {
   return new Set(items.map((t) => String(t.content)));
 }
@@ -194,7 +199,16 @@ function pushStage(d, todos, at) {
     let shared = 0;
     for (const c of next) if (prev.has(c)) shared += 1;
     const overlap = shared / Math.max(prev.size, next.size, 1);
-    if (overlap >= STAGE_SAME_TASK_OVERLAP) {
+
+    // 同一任务的两种情形：
+    //  1) 条目重合度 ≥ 50%（追加/勾选/小改）
+    //  2) 首条任务没变（任务目标没变，只是后面的步骤被重写了措辞）
+    const prevFirst = normalizeTask(current.items[0]?.content);
+    const nextFirst = normalizeTask(items[0]?.content);
+    const sameHead = prevFirst && nextFirst && (prevFirst === nextFirst
+      || prevFirst.startsWith(nextFirst) || nextFirst.startsWith(prevFirst));
+
+    if (overlap >= STAGE_SAME_TASK_OVERLAP || sameHead) {
       current.items = items; // 同一任务：采用最新清单与状态
       return;
     }
@@ -344,7 +358,7 @@ export function digestEvents(events) {
 
 const CACHE_FILE = 'session-digests.json';
 /** 摘要格式版本：不兼容时整份缓存作废（例如解压失败曾写入空摘要）。 */
-const DIGEST_CACHE_VERSION = 4; // 3: 阶段按内容切分（旧版按状态切分，会过度切分）
+const DIGEST_CACHE_VERSION = 5; // 3: 阶段按内容切分（旧版按状态切分，会过度切分）
 
 export function loadDigestCache(dataDir) {
   try {
