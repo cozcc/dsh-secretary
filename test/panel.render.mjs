@@ -136,7 +136,11 @@ const reg = {};
 const opened = [];
 const ctx = {
   effect: (f) => f(),
-  get: (key) => (key === 'uiWorkspace' ? { openSession: (id) => { opened.push(String(id)); } } : undefined),
+  get: (key) => {
+    if (key === 'uiWorkspace') return { openSession: (id) => { opened.push(String(id)); } };
+    if (key === 'sessions') return { binding: (id) => (String(id).startsWith('session-') ? undefined : { session: {} }) };
+    return undefined;
+  },
   slots: { inject: (n, cb) => cb(), register: (o, C) => { reg[o.name === 'main' ? 'main' : 'sidebar'] = C; } },
 };
 mod.apply(ctx);
@@ -553,6 +557,16 @@ if (histBtn2) {
   await act(async () => { histBtn2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 100)); });
 }
 check('历史里能看到各阶段清单', text().includes('第 1 个任务 · 1/1') && text().includes('第 2 个任务 · 1/2'), text().slice(-200));
+
+
+// ── 跳转前会校验 id 写法（否则会开出空白线程）───────────
+const beforeVariant = opened.length;
+const openBtn2 = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '打开线程');
+if (openBtn2) {
+  await act(async () => { openBtn2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
+}
+check('跳转用的是被服务认可的 id 写法', opened.length > beforeVariant && !String(opened.at(-1)).startsWith('session-'),
+  `最近一次跳转 id = ${opened.at(-1)}`);
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

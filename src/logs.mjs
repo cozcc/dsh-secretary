@@ -147,6 +147,22 @@ export function readWorkspaces(home = dshHome()) {
 
 /** 读投影缓存里的 DSH Session Goal（比从日志里找 create_goal 更权威）。 */
 export function readCachedGoal(home, sessionId) {
+  // 投影缓存的文件名用裸 uuid，而会话日志头里的 id 可能带 session- 前缀：两种都试
+  const id = String(sessionId ?? '');
+  const bare = id.startsWith('session-') ? id.slice('session-'.length) : id;
+  const candidates = [...new Set([bare, id].filter(Boolean))];
+  for (const candidate of candidates) {
+    try {
+      const found = readGoalFile(home, candidate);
+      if (found) return found;
+    } catch {
+      // 换下一个写法
+    }
+  }
+  return null;
+}
+
+function readGoalFile(home, sessionId) {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(home, 'storages', 'session_projcache', 'sessions', `${sessionId}.json`), 'utf8'));
     const goal = raw?.record?.rows?.goal?.val?.current;
