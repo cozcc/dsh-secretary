@@ -59,6 +59,12 @@ globalThis.fetch = async (url, opts = {}) => {
   const body = opts.body ? JSON.parse(opts.body) : {};
   calls.push(`${opts.method ?? 'GET'} ${route}`);
   if (route === '/board') return { ok: true, status: 200, async text() { return JSON.stringify(reply()); } };
+  if (route.startsWith('/session/resolve')) {
+    const raw = new URL(String(url), 'http://x').searchParams.get('id') || '';
+    const bare = raw.startsWith('session-') ? raw.slice('session-'.length) : raw;
+    if (raw === 'nope') return { ok: false, status: 404, async text() { return JSON.stringify({ error: '会话不存在' }); } };
+    return { ok: true, status: 200, async text() { return JSON.stringify({ id: bare, resolvedBy: 'sessionQuery' }); } };
+  }
   if (route.startsWith('/note/export')) {
     return { ok: true, status: 200, async text() { return '# 导出的便签\n\n- 状态：未完成\n'; } };
   }
@@ -565,8 +571,9 @@ const openBtn2 = [...host.querySelectorAll('button')].find((b) => (b.textContent
 if (openBtn2) {
   await act(async () => { openBtn2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
 }
-check('跳转用的是被服务认可的 id 写法', opened.length > beforeVariant && !String(opened.at(-1)).startsWith('session-'),
+check('跳转用的是宿主解析出的 id 写法', opened.length > beforeVariant && !String(opened.at(-1)).startsWith('session-'),
   `最近一次跳转 id = ${opened.at(-1)}`);
+check('跳转前会问 /session/resolve', calls.some((c) => c.startsWith('GET /session/resolve')), calls.slice(-3).join(' → '));
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

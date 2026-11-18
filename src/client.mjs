@@ -593,6 +593,22 @@ const TONE = {
   normal: {},
 };
 
+/**
+ * 问宿主：这个会话 id 的哪种写法是真的？（返回 null = 会话不存在）
+ * 跳转前用它换成宿主/UI 认的写法，避免开出空白线程。
+ */
+async function resolveSessionIdViaHost(id) {
+  const token = (typeof globalThis !== 'undefined' && globalThis.__WORKBENCH_TOKEN__) || '';
+  const res = await fetch(`${API}/session/resolve?id=${encodeURIComponent(id)}`, {
+    headers: token ? { 'X-Workbench-Token': token } : {},
+    cache: 'no-store',
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  return data?.id ? String(data.id) : null;
+}
+
 /* ── 工具 ──────────────────────────────────────────────── */
 
 /** token 缩写：12.3k / 1.24M */
@@ -1052,7 +1068,7 @@ function makeBriefPage(React) {
         (brief.sections ?? []).map((section, i) => renderSection(
           section,
           i,
-          onOpenSession ? (id) => { if (id) onOpenSession(id); } : null,
+          onOpenSession ? (id) => { if (id) void onOpenSession(id); } : null,
         )),
 
         totals
@@ -1378,8 +1394,9 @@ function makeWorkspace(React, openSession) {
       if (!sessionId) return;
       const draft = buildDraft(note);
       const copied = await copyText(draft);
-      const jumped = openSession?.(sessionId);
-      if (jumped === false) setToast('当前环境不支持跳转，已只复制草稿');
+      const verdict = await openSession?.(sessionId);
+      if (verdict === 'not-found') setToast('续做草稿已复制 · 但这个会话已不存在');
+      else if (verdict === 'unavailable') setToast('续做草稿已复制 · 当前环境不支持跳转');
       if (copied) setToast('续做草稿已复制 · 在会话输入框粘贴即可');
       else setDraftFallback(draft);
     };
@@ -1774,7 +1791,11 @@ function makeWorkspace(React, openSession) {
             drag: drag && drag.id === n.id ? drag : null,
             dragHot,
             autoEdit: autoEditId === n.id,
-            onOpenSession: (id) => { if (openSession?.(id) === false) setToast('当前环境不支持跳转'); },
+            onOpenSession: async (id) => {
+              const verdict = await openSession?.(id);
+              if (verdict === 'not-found') setToast('这个会话已不存在（可能被删除）');
+              else if (verdict === 'unavailable') setToast('当前环境不支持跳转');
+            },
             onRefresh: refreshCard,
             onCancel: cancelCard,
             onContinue: continueTask,
@@ -1965,60 +1986,53 @@ function idVariants(id) {
   return raw.startsWith('session-') ? [raw, bare] : [raw, `session-${raw}`];
 }
 
-function makeNavigator(ctx) {
+/**
+ * 跳到一个会话。返回 'ok' | 'unavailable' | 'not-found'。
+ *
+ * 为什么先问宿主：DSH 的会话 id 有「裸 uuid」和「session- 前缀」两种存量写法，
+ * 把不认识的那种交给 openSession 会被当成新会话、打开一个空白线程。
+ * 客户端自己探测不可靠（sessions.binding 对没打开过的冷会话就是空的），
+ * 所以由宿主的会话存储来判定哪个写法真的存在。
+ */
+function makeNavigator(ctx, resolveId) {
   const grab = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined);
 
-  /**
-   * 跳到一个会话。
-   *
-   * DSH 里会话 id 有「裸 uuid」和「session- 前缀」两种历史写法，存量数据混用。
-   * 直接把认不出的 id 交给 openSession 会被当成新会话，打开一个空白线程——所以
-   * 先用 sessions.binding(id) 问一下哪个写法真的存在，只跳存在的那个。
-   */
-  return (sessionId) => {
-    if (!sessionId) return false;
-    // 每次点击时再取服务：插件可能先于这些服务加载
+  return async (sessionId) => {
+    if (!sessionId) return 'not-found';
     const uiWorkspace = grab('uiWorkspace');
-    const sessions = grab('sessions');
 
-    let target = null;
-    for (const candidate of idVariants(sessionId)) {
+    let target = String(sessionId);
+    if (typeof resolveId === 'function') {
       try {
-        if (sessions && typeof sessions.binding === 'function' && sessions.binding(candidate)) {
-          target = candidate;
-          break;
-        }
+        const resolved = await resolveId(String(sessionId));
+        if (resolved === null) return 'not-found';       // 宿主说：这个会话不存在
+        if (resolved) target = resolved;                  // 宿主给了它认的写法
       } catch {
-        // binding 探测失败就换下一个写法
+        // 解析失败：按原样尝试（老版本宿主没有这个接口）
       }
-    }
-    // 探测不到（服务缺失或两种写法都不认识）：宁可不跳，也不要开空白线程
-    if (!target) {
-      if (!sessions) target = sessionId; // 没有 sessions 服务时退回原样
-      else return false;
     }
 
     try {
       if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
         uiWorkspace.openSession(target);
-        return true;
+        return 'ok';
       }
       const layout = grab('layout');
       if (layout && typeof layout.selectPanel === 'function') {
         layout.selectPanel('conversation');
-        return true;
+        return 'ok';
       }
     } catch (error) {
       console.error('[secretary] 打开会话失败', error);
     }
-    return false;
+    return 'unavailable';
   };
 }
 
 function apply(ctx) {
   const React = runtime.React;
   const Icon = makeIcon(React);
-  const openSession = makeNavigator(ctx);
+  const openSession = makeNavigator(ctx, resolveSessionIdViaHost);
   const Workspace = makeWorkspace(React, openSession);
   const Boundary = makeBoundary(React);
 
