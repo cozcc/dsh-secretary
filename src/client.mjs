@@ -606,7 +606,14 @@ async function resolveSessionIdViaHost(id) {
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json();
-  return data?.id ? String(data.id) : null;
+  if (!data?.id) return null;
+  return {
+    id: String(data.id),
+    listed: data.listed === true,
+    workspace: String(data.workspace ?? ''),
+    cwd: String(data.cwd ?? ''),
+    title: String(data.title ?? ''),
+  };
 }
 
 /* ── 工具 ──────────────────────────────────────────────── */
@@ -1079,7 +1086,7 @@ function makeBriefPage(React) {
   };
 }
 
-function makeWorkspace(React, openSession) {
+function makeWorkspace(React, openSession, ctxRef) {
   const h = React.createElement;
   const api = createApi();
   const Note = makeNote(React, api, (data) => boardSink.fn?.(data));
@@ -1111,6 +1118,8 @@ function makeWorkspace(React, openSession) {
     const [progress, setProgress] = React.useState(null);
     /** 剪贴板不可用时的兜底：把草稿显示出来让人手动复制。 */
     const [draftFallback, setDraftFallback] = React.useState(null);
+    /** 会话所在目录没登记为工作区时（侧边栏里没有它）的提示。 */
+    const [unlisted, setUnlisted] = React.useState(null);
     /** 两个页面：便签画布 / 助理简报。 */
     const [tab, setTab] = React.useState('notes');
     /** 简报历史（日期列表）与正在看的那一份。 */
@@ -1424,6 +1433,26 @@ function makeWorkspace(React, openSession) {
         setToast(cancelled ? '已放弃这个任务（可随时恢复）' : '已恢复到看板');
       } catch (e) {
         setError(`${cancelled ? '放弃' : '恢复'}失败：${e.message}`);
+      }
+    };
+
+    /**
+     * 会话所在目录还没登记成工作区时：注册它，然后打开这个会话。
+     * （DSH 的工作区按完整目录精确匹配，子目录不会自动归属。）
+     */
+    const registerAndOpen = async () => {
+      const pending = unlisted;
+      if (!pending?.cwd) return;
+      const workspaces = typeof ctxRef.current?.get === 'function' ? ctxRef.current.get('workspaces') : undefined;
+      const uiWorkspace = typeof ctxRef.current?.get === 'function' ? ctxRef.current.get('uiWorkspace') : undefined;
+      try {
+        if (!workspaces?.create) { setToast('当前环境不能创建工作区'); return; }
+        const ws = await workspaces.create({ path: pending.cwd });
+        setUnlisted(null);
+        if (uiWorkspace?.openSession) uiWorkspace.openSession(pending.sessionId);
+        setToast(`已把 ${ws?.title || pending.cwd} 注册为工作区并打开会话`);
+      } catch (e) {
+        setError(`注册工作区失败：${e.message}`);
       }
     };
 
@@ -1792,9 +1821,14 @@ function makeWorkspace(React, openSession) {
             dragHot,
             autoEdit: autoEditId === n.id,
             onOpenSession: async (id) => {
-              const verdict = await openSession?.(id);
-              if (verdict === 'not-found') setToast('这个会话已不存在（可能被删除）');
-              else if (verdict === 'unavailable') setToast('当前环境不支持跳转');
+              const result = await openSession?.(id);
+              if (!result) return;
+              if (result.verdict === 'not-found') setToast('这个会话已不存在（可能被删除）');
+              else if (result.verdict === 'unavailable') setToast('当前环境不支持跳转');
+              else if (result.verdict === 'unlisted') {
+                setToast('这个会话不在任何工作区里，先注册目录再打开');
+                setUnlisted({ sessionId: id, cwd: result.cwd });
+              }
             },
             onRefresh: refreshCard,
             onCancel: cancelCard,
@@ -1874,6 +1908,19 @@ function makeWorkspace(React, openSession) {
                 onClick: () => { setSettingsDraft(settings); setShowSettings(false); },
                 style: { ...S.crashBtn, flex: '1', height: '26px', fontSize: '11.5px' },
               }, '取消')))
+          : null,
+        unlisted
+          ? h('div', { style: S.draftModal },
+            h('div', { style: { fontSize: '12.5px', fontWeight: 600 } }, '这个会话不在任何工作区里'),
+            h('div', { style: { fontSize: '11.5px', lineHeight: '17px', color: TEXT_2 } },
+              `它的目录是 ${unlisted.cwd || '（未知）'}，DSH 的工作区按完整目录精确匹配，所以侧边栏里没有这个会话——直接跳转会开出一个空白会话。`),
+            h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+              h('button', { type: 'button', style: S.crashBtn, onClick: () => setUnlisted(null) }, '算了'),
+              h('button', {
+                type: 'button',
+                style: { ...S.crashBtn, background: ACCENT, color: '#fff', borderColor: ACCENT },
+                onClick: registerAndOpen,
+              }, '注册目录并打开')))
           : null,
         draftFallback
           ? h('div', { style: S.draftModal },
@@ -2005,8 +2052,12 @@ function makeNavigator(ctx, resolveId) {
     if (typeof resolveId === 'function') {
       try {
         const resolved = await resolveId(String(sessionId));
-        if (resolved === null) return 'not-found';       // 宿主说：这个会话不存在
-        if (resolved) target = resolved;                  // 宿主给了它认的写法
+        if (resolved === null) return { verdict: 'not-found' };      // 宿主说：这个会话不存在
+        if (resolved) {
+          target = resolved.id;
+          // 没登记在任何工作区里 → 侧边栏没有它，openSession 只会开出空白会话
+          if (!resolved.listed) return { verdict: 'unlisted', cwd: resolved.cwd };
+        }
       } catch {
         // 解析失败：按原样尝试（老版本宿主没有这个接口）
       }
@@ -2015,17 +2066,17 @@ function makeNavigator(ctx, resolveId) {
     try {
       if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
         uiWorkspace.openSession(target);
-        return 'ok';
+        return { verdict: 'ok' };
       }
       const layout = grab('layout');
       if (layout && typeof layout.selectPanel === 'function') {
         layout.selectPanel('conversation');
-        return 'ok';
+        return { verdict: 'ok' };
       }
     } catch (error) {
       console.error('[secretary] 打开会话失败', error);
     }
-    return 'unavailable';
+    return { verdict: 'unavailable' };
   };
 }
 
@@ -2033,7 +2084,7 @@ function apply(ctx) {
   const React = runtime.React;
   const Icon = makeIcon(React);
   const openSession = makeNavigator(ctx, resolveSessionIdViaHost);
-  const Workspace = makeWorkspace(React, openSession);
+  const Workspace = makeWorkspace(React, openSession, { current: ctx });
   const Boundary = makeBoundary(React);
 
   // 包一层错误边界：以后再出渲染异常，面板里会显示原因和「重试」。

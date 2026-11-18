@@ -163,11 +163,39 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
               const candidates = [...new Set([raw, bare, `session-${bare}`])];
               const query = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : undefined;
               if (!query) return json(res, 200, { id: raw, resolvedBy: 'fallback' });
+
+              // 顺带查清楚：这个会话是否登记在某个工作区里（不登记的话侧边栏没有它，
+              // 前端 openSession 选不中，只会开出一个空白会话）
+              const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+              const listedIn = (id) => {
+                for (const ws of registry?.list?.() ?? []) {
+                  const ids = (ws?.sessionIds ?? []).map(String);
+                  for (const form of [String(id), String(id).replace(/^session-/, ''), `session-${String(id).replace(/^session-/, '')}`]) {
+                    if (ids.includes(form)) return { title: ws?.title ?? '', path: ws?.path ?? '' };
+                  }
+                }
+                return null;
+              };
+
               for (const candidate of candidates) {
                 try {
                   const snap = await query.readTitleSnapshot(candidate);
                   if (snap !== undefined && snap !== null) {
-                    return json(res, 200, { id: candidate, title: snap?.title?.title ?? '', resolvedBy: 'sessionQuery' });
+                    const listed = listedIn(candidate);
+                    let cwd = '';
+                    try {
+                      const full = await query.readSession(candidate);
+                      cwd = String(full?.header?.cwd ?? '');
+                    } catch { /* cwd 读不到不影响跳转 */ }
+                    return json(res, 200, {
+                      id: candidate,
+                      title: snap?.title?.title ?? '',
+                      listed: Boolean(listed),
+                      workspace: listed?.title ?? '',
+                      workspacePath: listed?.path ?? '',
+                      cwd,
+                      resolvedBy: 'sessionQuery',
+                    });
                   }
                 } catch {
                   // 这个写法不认识，试下一个

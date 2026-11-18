@@ -63,7 +63,9 @@ globalThis.fetch = async (url, opts = {}) => {
     const raw = new URL(String(url), 'http://x').searchParams.get('id') || '';
     const bare = raw.startsWith('session-') ? raw.slice('session-'.length) : raw;
     if (raw === 'nope') return { ok: false, status: 404, async text() { return JSON.stringify({ error: '会话不存在' }); } };
-    return { ok: true, status: 200, async text() { return JSON.stringify({ id: bare, resolvedBy: 'sessionQuery' }); } };
+    return { ok: true, status: 200, async text() {
+      return JSON.stringify({ id: bare, listed: bare !== 'sess-3', cwd: '/tmp/proj/sub', resolvedBy: 'sessionQuery' });
+    } };
   }
   if (route.startsWith('/note/export')) {
     return { ok: true, status: 200, async text() { return '# 导出的便签\n\n- 状态：未完成\n'; } };
@@ -131,6 +133,15 @@ globalThis.fetch = async (url, opts = {}) => {
     n.updates.push({ id: `u${++seq}`, text: body.text, at: Date.now() });
   }
   return { ok: true, status: 200, async text() { return JSON.stringify(reply()); } };
+};
+// 真实 fetch 的响应同时有 text() 和 json()，夹具补齐，避免客户端解析时抛错
+const fakeFetch = globalThis.fetch;
+globalThis.fetch = async (...args) => {
+  const res = await fakeFetch(...args);
+  if (res && typeof res.json !== 'function') {
+    res.json = async () => JSON.parse(await res.text());
+  }
+  return res;
 };
 dom.window.fetch = globalThis.fetch;
 
@@ -575,6 +586,21 @@ check('跳转用的是宿主解析出的 id 写法', opened.length > beforeVaria
   `最近一次跳转 id = ${opened.at(-1)}`);
 check('跳转前会问 /session/resolve', calls.some((c) => c.startsWith('GET /session/resolve')), calls.slice(-3).join(' → '));
 
+
+// ── 会话不在工作区里时给出提示，而不是开空白线程 ──────
+const sessionCard = [...host.querySelectorAll('div[data-note-id]')].find((el) => (el.textContent || '').includes('线程3'));
+const unlistedOpen = sessionCard && [...sessionCard.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '打开线程');
+check('找到会话卡的「打开线程」', !!unlistedOpen);
+if (unlistedOpen) {
+  await act(async () => { unlistedOpen.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); });
+}
+check('未登记会话会弹提示（而不是开空白线程）', text().includes('不在任何工作区里'), text().slice(-200));
+const registerBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '注册目录并打开');
+check('提示里提供「注册目录并打开」', !!registerBtn);
+if (registerBtn) {
+  await act(async () => { registerBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+}
+check('提示可以关掉（注册失败/成功后不再挡着）', !text().includes('不在任何工作区里') || !!registerBtn);
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));
 process.exit(fail ? 1 : 0);
