@@ -15,6 +15,7 @@ import { scanSessions } from './sessions.mjs';
 import { readSettings, writeSettings } from './settings.mjs';
 import { runBrief } from './briefing.mjs';
 import { listBriefs, readBrief } from './brief.mjs';
+import { readSessionCwd } from './logs.mjs';
 import { loadLedger, totals as ledgerTotals } from './cumulative.mjs';
 
 export const ROUTE_PREFIX = '/workbench/api';
@@ -185,8 +186,9 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
                     let cwd = '';
                     try {
                       const full = await query.readSession(candidate);
-                      cwd = String(full?.header?.cwd ?? '');
-                    } catch { /* cwd 读不到不影响跳转 */ }
+                      cwd = String(full?.header?.cwd ?? full?.snapshot?.header?.cwd ?? '');
+                    } catch { /* 下面用日志头兜底 */ }
+                    if (!cwd) cwd = readSessionCwd(undefined, candidate);
                     return json(res, 200, {
                       id: candidate,
                       title: snap?.title?.title ?? '',

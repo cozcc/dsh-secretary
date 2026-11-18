@@ -59,7 +59,7 @@ const inline = (name, file, exports) => {
 const boardCode = inline('boardMod', 'src/board.mjs',
   'DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions, pushHistory, noteToMarkdown, removeNotesBySources, LIMITS');
 const storeCode = inline('storeMod', 'src/store.mjs', 'BoardStore, defaultDataDir');
-const logsCode = inline('logsMod', 'src/logs.mjs', 'dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, digestEvents, loadDigestCache, saveDigestCache');
+const logsCode = inline('logsMod', 'src/logs.mjs', 'dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, readSessionCwd, digestEvents, loadDigestCache, saveDigestCache');
 const insightsCode = inline('insightsMod', 'src/insights.mjs', 'collectPortraits');
 const sessionsCode = inline('sessionsMod', 'src/sessions.mjs', 'scanSessions, parseTodoArguments');
 const cumulativeCode = inline('cumulativeMod', 'src/cumulative.mjs', 'emptyLedger, loadLedger, saveLedger, isIngested, ingest, totals, dailySeries');
@@ -103,7 +103,7 @@ ${httpCode}
 
 const { DEFAULT_BOARD, normalizeBoard, stats, addNote, updateNote, setDone, addUpdate, removeUpdate, removeNote, findNote, summaryText, COLORS, newId, importSessions, upsertBriefNote, nextFreeSlot, applyPositions, pushHistory, noteToMarkdown, removeNotesBySources, LIMITS } = boardMod;
 const { BoardStore, defaultDataDir } = storeMod;
-const { dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, digestEvents, loadDigestCache, saveDigestCache } = logsMod;
+const { dshHome, decodeFrames, decodeSessionFile, listSessionLogs, readWorkspaces, readCachedGoal, readSessionCwd, digestEvents, loadDigestCache, saveDigestCache } = logsMod;
 const { collectPortraits } = insightsMod;
 const { scanSessions, parseTodoArguments } = sessionsMod;
 const { emptyLedger, loadLedger, saveLedger, isIngested, ingest, totals: ledgerTotals, dailySeries } = cumulativeMod;

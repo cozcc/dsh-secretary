@@ -129,6 +129,34 @@ export function listSessionLogs(home = dshHome()) {
   return out;
 }
 
+/** 从会话日志头里读 cwd（不需要 sessionQuery；两种 id 写法都试）。 */
+export function readSessionCwd(home, sessionId) {
+  const raw = String(sessionId ?? '').trim();
+  if (!raw) return '';
+  const bare = raw.startsWith('session-') ? raw.slice('session-'.length) : raw;
+  const names = [...new Set([raw, bare, `session-${bare}`])];
+  let projects = [];
+  try {
+    projects = fs.readdirSync(path.join(home ?? dshHome(), 'sessions'), { withFileTypes: true })
+      .filter((d) => d.isDirectory());
+  } catch {
+    return '';
+  }
+  for (const project of projects) {
+    for (const name of names) {
+      const file = path.join(home ?? dshHome(), 'sessions', project.name, name, 'session.v4.jsonl.zstd');
+      try {
+        const { events } = decodeSessionFile(file);
+        const head = events.find((e) => e.type === 'session');
+        if (head?.cwd) return String(head.cwd);
+      } catch {
+        // 换下一个写法
+      }
+    }
+  }
+  return '';
+}
+
 /** 读工作区注册表：sessionId → { id, title, path }。 */
 export function readWorkspaces(home = dshHome()) {
   const map = new Map();
