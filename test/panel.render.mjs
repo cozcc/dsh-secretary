@@ -151,10 +151,14 @@ new Function('window', 'globalThis', fs.readFileSync(bundlePath, 'utf8'))(dom.wi
 
 const reg = {};
 const opened = [];
+const openedWorkspace = [];
 const ctx = {
   effect: (f) => f(),
   get: (key) => {
-    if (key === 'uiWorkspace') return { openSession: (id) => { opened.push(String(id)); } };
+    if (key === 'uiWorkspace') return {
+      openSession: (id) => { opened.push(String(id)); },
+      openWorkspace: (id) => { openedWorkspace.push(String(id)); },
+    };
     if (key === 'sessions') return { binding: (id) => (String(id).startsWith('session-') ? undefined : { session: {} }) };
     return undefined;
   },
@@ -598,8 +602,9 @@ check('未登记会话会弹提示（而不是开空白线程）', text().includ
 const registerBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '注册目录并打开');
 check('提示里提供「注册目录并打开」', !!registerBtn);
 if (registerBtn) {
-  await act(async () => { registerBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+  await act(async () => { registerBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); });
 }
+check('收编后只选中会话，不开空白会话（不调 openWorkspace）', openedWorkspace.length === 0, JSON.stringify(openedWorkspace));
 check('提示可以关掉（注册失败/成功后不再挡着）', !text().includes('不在任何工作区里') || !!registerBtn);
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

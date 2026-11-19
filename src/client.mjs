@@ -1449,10 +1449,9 @@ function makeWorkspace(React, openSession, ctxRef) {
         // 宿主负责：按 cwd 找到/创建工作区，并把会话 attach 进去
         const adopted = await api.adoptSession(pending.sessionId, pending.cwd);
         setUnlisted(null);
-        // 先连上这个工作区（让侧边栏与客户端拿到它的会话），再打开会话
-        if (uiWorkspace?.openWorkspace && adopted?.workspaceId) {
-          try { await uiWorkspace.openWorkspace(adopted.workspaceId); } catch { /* 打开工作区失败就直接尝试开会话 */ }
-        }
+        // 注意：不要调 openWorkspace——它的语义是「连接工作区并打开它的空白会话」，
+        // 会先开出一个新会话，把后面的 openSession 顶掉。会话已经 attach 过了，
+        // 这里只需要直接选中它。
         if (uiWorkspace?.openSession) uiWorkspace.openSession(adopted?.sessionId || pending.sessionId);
         setToast(`已注册工作区${adopted?.title ? `「${adopted.title}」` : ''}并打开会话`);
       } catch (e) {
