@@ -206,6 +206,56 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
               return json(res, 404, { error: '会话不存在', tried: candidates });
             }
 
+            /**
+             * 把一个「不在任何工作区」的会话收编进来：
+             * 按它的 cwd 找到或创建工作区，再把会话 attach 到该工作区。
+             * 不 attach 的话，新工作区里不认识这条会话，openSession 仍然只能开空白会话。
+             */
+            if (route === '/session/adopt' && method === 'POST') {
+              const body = await readJsonBody(req);
+              const raw = String(body.id ?? '').trim();
+              if (!raw) return json(res, 400, { error: 'id 必填' });
+              const registry = typeof ctx.get === 'function' ? ctx.get('workspaceRegistry') : undefined;
+              const query = typeof ctx.get === 'function' ? ctx.get('sessionQuery') : undefined;
+              if (!registry) return json(res, 501, { error: '当前环境没有 workspaceRegistry，无法注册工作区' });
+
+              const bare = raw.startsWith('session-') ? raw.slice('session-'.length) : raw;
+              const candidates = [...new Set([raw, bare, `session-${bare}`])];
+              let sessionId = null;
+              if (query) {
+                for (const candidate of candidates) {
+                  try {
+                    const snap = await query.readTitleSnapshot(candidate);
+                    if (snap !== undefined && snap !== null) { sessionId = candidate; break; }
+                  } catch { /* 换下一个写法 */ }
+                }
+              }
+              if (!sessionId) sessionId = raw;
+
+              // cwd 优先用调用方给的（面板从 /session/resolve 已经拿到），读不到再翻日志头
+              const cwd = String(body.cwd ?? '').trim() || readSessionCwd(undefined, sessionId);
+              if (!cwd) return json(res, 400, { error: '读不到该会话的目录，无法注册工作区' });
+
+              let workspace = registry.list().find((w) => String(w?.path ?? '') === cwd) ?? null;
+              let created = false;
+              if (!workspace) {
+                workspace = await registry.create(cwd);
+                created = true;
+              }
+              try {
+                await workspace.attachSession(sessionId);
+              } catch (error) {
+                log(`attach 会话失败（可能已属于该工作区）：${error?.message ?? error}`);
+              }
+              return json(res, 200, {
+                sessionId,
+                cwd,
+                workspaceId: String(workspace?.id ?? ''),
+                title: String(workspace?.title ?? ''),
+                created,
+              });
+            }
+
             if (route === '/cumulative' && method === 'GET') {
               return json(res, 200, { totals: ledgerTotals(loadLedger(dataDir)) });
             }

@@ -13,7 +13,7 @@ import path from 'node:path';
 import { registerHttpRoutes } from '../src/http.mjs';
 import { BoardStore } from '../src/store.mjs';
 
-function makeServer({ admit } = {}) {
+function makeServer({ admit, workspaceRegistry, sessionQuery } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wb-http-'));
   const store = new BoardStore(dataDir);
   let handler = null;
@@ -23,7 +23,12 @@ function makeServer({ admit } = {}) {
     on: () => {},
     effect: (fn) => fn(),
     inject: (deps, cb) => injected.push(cb),
-    get: (key) => (key === 'connection' ? connection : undefined),
+    get: (key) => {
+      if (key === 'connection') return connection;
+      if (key === 'workspaceRegistry') return workspaceRegistry;
+      if (key === 'sessionQuery') return sessionQuery;
+      return undefined;
+    },
   };
   registerHttpRoutes(ctx, { store, log: () => {} });
   for (const cb of injected) {
@@ -127,4 +132,28 @@ test('新建的便签自带变更历史', async () => {
   const note = board.notes.find((n) => n.text === '带历史');
   assert.ok(note.history.length >= 1);
   assert.equal(note.history[0].kind, 'created');
+});
+
+
+test('收编会话：按 cwd 建工作区并 attach，然后就能打开', async () => {
+  const attached = [];
+  const created = [];
+  const registry = {
+    list: () => created,
+    create: async (path) => {
+      const ws = { id: 'ws-new', path, title: 'source', sessionIds: [], attachSession: async (id) => { attached.push([ws.id, id]); } };
+      created.push(ws);
+      return ws;
+    },
+  };
+  const sessionQuery = {
+    readTitleSnapshot: async (id) => (id.startsWith('session-') ? { title: { title: 'T' } } : (() => { throw new Error('unknown'); })()),
+  };
+  const s = makeServer({ admit: () => ownerPeer, workspaceRegistry: registry, sessionQuery });
+  const r = await s.call('POST', '/workbench/api/session/adopt', { 'content-type': 'application/json' },
+    { id: 'session-abc-123', cwd: '/tmp/demo' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.sessionId, 'session-abc-123');
+  assert.equal(r.body.created, true);
+  assert.deepEqual(attached, [['ws-new', 'session-abc-123']], '会话必须被 attach 到新工作区');
 });
