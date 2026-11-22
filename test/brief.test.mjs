@@ -14,7 +14,9 @@ import { sumUsage, fmtTokens } from '../src/pricing.mjs';
 import { composeBrief, briefText, dateKey, saveBrief, listBriefs, pruneBriefs } from '../src/brief.mjs';
 import { upsertBriefNote, normalizeBoard, stats } from '../src/board.mjs';
 import { sanitize, readSettings, writeSettings } from '../src/settings.mjs';
-import { emptyLedger, ingest, totals, isIngested, dailySeries } from '../src/cumulative.mjs';
+import { emptyLedger, ingest, totals, isIngested, dailySeries, saveLedger } from '../src/cumulative.mjs';
+import { buildWeekly, weekStartOf, dayKey } from '../src/weekly.mjs';
+import { BoardStore } from '../src/store.mjs';
 
 const tmpDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'workbench-brief-'));
 
@@ -183,4 +185,43 @@ test('子代理线程不进简报、不计入本期消耗', () => {
   assert.equal(brief.totals.sessions, 1, '子代理不算一个会话');
   const text = briefText(brief);
   assert.ok(!text.includes('READ-ONLY'), '子代理不该出现在简报里');
+});
+
+
+test('本周看板：按周一为界统计 token / 会话 / 完成任务，并给出上周对比', async () => {
+  const dir = tmpDir();
+  const store = new BoardStore(dir);
+  // 固定一个周三作为“现在”
+  const now = new Date('2026-11-18T10:00:00+08:00').getTime(); // 周三
+  const start = weekStartOf(now);
+  assert.equal(dayKey(start), '2026-11-16', '周一应当是 11-16');
+
+  const ledger = emptyLedger();
+  // 本周两天有消耗，两个会话
+  ingest(ledger, 's1', 1, { '2026-11-16': { input: 100, output: 10, cached: 0 }, '2026-11-18': { input: 50, output: 5, cached: 0 } });
+  ingest(ledger, 's2', 2, { '2026-11-17': { input: 200, output: 20, cached: 0 } });
+  // 上周一天
+  ingest(ledger, 's3', 3, { '2026-11-10': { input: 400, output: 40, cached: 0 } });
+  saveLedger(dir, ledger, now);
+  // 用真实 store 写一份带完成时间的看板
+  await store.mutate((b) => {
+    b.notes.push(
+      { id: 'a', text: '本周完成', done: true, x: 0, y: 0, color: 'yellow', createdAt: 1, updatedAt: 1, doneAt: start + 3600e3, updates: [], todos: [], source: null },
+      { id: 'b', text: '上周完成', done: true, x: 0, y: 0, color: 'yellow', createdAt: 1, updatedAt: 1, doneAt: start - 86400e3, updates: [], todos: [], source: null },
+      { id: 'c', text: '还没做', done: false, x: 0, y: 0, color: 'yellow', createdAt: 2, updatedAt: 2, doneAt: null, updates: [], todos: [], source: null },
+    );
+  });
+
+  const w = buildWeekly({ dataDir: dir, store, now });
+  assert.equal(w.weekStart, '2026-11-16');
+  assert.equal(w.totals.tokens, 385, `本周 token 应为 100+10+50+5+200+20=385，实际 ${w.totals.tokens}`);
+  assert.equal(w.totals.sessions, 3, '本周活跃会话：s1 两天 + s2 一天');
+  assert.equal(w.totals.done, 1);
+  assert.equal(w.totals.open, 1);
+  assert.equal(w.lastWeek.tokens, 440);
+  assert.equal(w.lastWeek.done, 1);
+  assert.equal(w.days.length, 7);
+  assert.equal(w.days[0].date, '2026-11-16');
+  assert.equal(w.days[2].tokens, 55, '周三应为 50+5');
+  assert.equal(w.doneCards[0].text, '本周完成');
 });

@@ -80,6 +80,24 @@ globalThis.fetch = async (url, opts = {}) => {
     for (const p of body.positions || []) { const n = notes.find((x) => x.id === p.id); if (n) { n.x = p.x; n.y = p.y; } }
     return { ok: true, status: 200, async text() { return JSON.stringify({ board: { version: 1, notes: JSON.parse(JSON.stringify(notes)) }, stats: stats() }); } };
   }
+  if (route === '/weekly') {
+    const payload = {
+      weekStart: '2026-11-16', weekEnd: '2026-11-22', weekNo: 47,
+      days: [
+        { date: '2026-11-16', weekday: '一', tokens: 1200, sessions: 2, future: false },
+        { date: '2026-11-17', weekday: '二', tokens: 800, sessions: 1, future: false },
+        { date: '2026-11-18', weekday: '三', tokens: 2400, sessions: 3, future: false },
+        { date: '2026-11-19', weekday: '四', tokens: 0, sessions: 0, future: true },
+        { date: '2026-11-20', weekday: '五', tokens: 0, sessions: 0, future: true },
+        { date: '2026-11-21', weekday: '六', tokens: 0, sessions: 0, future: true },
+        { date: '2026-11-22', weekday: '日', tokens: 0, sessions: 0, future: true },
+      ],
+      totals: { tokens: 4400, sessions: 6, done: 3, open: 5, input: 1, output: 1, cached: 1 },
+      lastWeek: { tokens: 4000, sessions: 4, done: 1 },
+      doneCards: [{ id: 'n1', text: '写周报', doneAt: Date.now() - 3600e3 }],
+    };
+    return { ok: true, status: 200, async text() { return JSON.stringify(payload); } };
+  }
   if (route === '/cumulative') {
     return { ok: true, status: 200, async text() { return JSON.stringify({ totals: { tokens: 1_450_000_000, usd: 19.48, sessions: 150, days: 30, firstDay: '2026-10-16', lastDay: '2026-11-15' } }); } };
   }
@@ -606,6 +624,22 @@ if (registerBtn) {
 }
 check('收编后只选中会话，不开空白会话（不调 openWorkspace）', openedWorkspace.length === 0, JSON.stringify(openedWorkspace));
 check('提示可以关掉（注册失败/成功后不再挡着）', !text().includes('不在任何工作区里') || !!registerBtn);
+
+// ── 本周页：三个数字 + 进度条 + 一周柱状图 ─────────────
+const weekTab = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '本周');
+check('顶栏有「本周」标签', !!weekTab);
+if (weekTab) {
+  await act(async () => { weekTab.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 150)); });
+}
+check('本周页显示会话/Token/完成任务', text().includes('本周进度') && text().includes('会话') && text().includes('Token') && text().includes('完成任务'), text().slice(0, 160));
+check('本周页有进度条', host.querySelectorAll('div').length > 0 && /width: \d+%/.test(host.innerHTML));
+check('本周页有一周柱状图（一到日）', ['一','二','三','四','五','六','日'].every((d) => text().includes(d)));
+check('本周页显示较上周对比', /较上周 [+-]?\d+%/.test(text()) || text().includes('本周新开始'), text().slice(0, 200));
+check('本周页有鼓励文案', text().includes('本周完成了 3 个任务') || text().includes('动一动'), text().slice(0, 200));
+// 回到便签页，后面用例继续
+const backNotes = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
+if (backNotes) await act(async () => { backNotes.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
+
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));
 process.exit(fail ? 1 : 0);

@@ -16,6 +16,7 @@ import { readSettings, writeSettings } from './settings.mjs';
 import { runBrief } from './briefing.mjs';
 import { listBriefs, readBrief } from './brief.mjs';
 import { readSessionCwd } from './logs.mjs';
+import { buildWeekly } from './weekly.mjs';
 import { loadLedger, totals as ledgerTotals } from './cumulative.mjs';
 
 export const ROUTE_PREFIX = '/workbench/api';
@@ -256,6 +257,9 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
               });
             }
 
+            if (route === '/weekly' && method === 'GET') {
+              return json(res, 200, buildWeekly({ dataDir, store }));
+            }
             if (route === '/cumulative' && method === 'GET') {
               return json(res, 200, { totals: ledgerTotals(loadLedger(dataDir)) });
             }

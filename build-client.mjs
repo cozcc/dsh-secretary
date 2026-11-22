@@ -66,6 +66,7 @@ const cumulativeCode = inline('cumulativeMod', 'src/cumulative.mjs', 'emptyLedge
 const pricingCode = inline('pricingMod', 'src/pricing.mjs', 'fmtTokens, sumUsage');
 const briefCode = inline('briefMod', 'src/brief.mjs', 'composeBrief, briefText, dateKey, saveBrief, pruneBriefs, listBriefs, readBrief');
 const settingsCode = inline('settingsMod', 'src/settings.mjs', 'DEFAULT_SETTINGS, readSettings, writeSettings, sanitize');
+const weeklyCode = inline('weeklyMod', 'src/weekly.mjs', 'buildWeekly, weekStartOf, dayKey');
 const briefingCode = inline('briefingMod', 'src/briefing.mjs', 'runBrief, runScheduledBrief');
 const httpCode = inline('httpMod', 'src/http.mjs', 'registerHttpRoutes');
 
@@ -97,6 +98,8 @@ ${briefCode}
 
 ${settingsCode}
 
+${weeklyCode}
+
 ${briefingCode}
 
 ${httpCode}
@@ -111,6 +114,7 @@ const { fmtTokens, sumUsage } = pricingMod;
 const { composeBrief, briefText, dateKey, saveBrief, pruneBriefs, listBriefs, readBrief } = briefMod;
 const { DEFAULT_SETTINGS, readSettings, writeSettings, sanitize } = settingsMod;
 const { runBrief, runScheduledBrief } = briefingMod;
+const { buildWeekly, weekStartOf, dayKey } = weeklyMod;
 const { registerHttpRoutes } = httpMod;
 
 ${indexBody}
