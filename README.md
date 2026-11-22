@@ -19,7 +19,7 @@
 - Default order puts **unfinished cards first**, then completed, then abandoned; inside a group the newest comes first
 - `自动排列` re-applies that order: left → right, wrap, then next row
 - Unified Apple-Notes-style palette and toolbar: white cards on a light canvas, one accent colour, 30px toolbar buttons
-- The toolbar keeps the three page tabs pinned on the left and shows only the actions that page can use (notes: new / arrange / pull / filter; brief: generate), with settings as a compact gear and counts as small chips
+- The toolbar is a pinned 菜单 button plus the three page tabs; every toggle (only-unfinished, auto-arrange, pull threads, generate briefing, settings) lives in that menu, and the only page action kept on the bar is ＋新建. Switching away from 便签 hides the canvas entirely
 
 ### 2. Session cards pulled from DSH threads
 - `拉取线程任务` scans **every workspace** and turns each thread's last `todo_write` list into a card
