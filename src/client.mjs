@@ -114,6 +114,12 @@ const S = {
     whiteSpace: 'nowrap',
     cursor: 'pointer',
   },
+  iconBtn: {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    width: '30px', height: '30px', borderRadius: '8px', flex: 'none',
+    border: `0.5px solid ${HAIRLINE}`, background: 'transparent', color: TEXT_2,
+    fontSize: '15px', lineHeight: '28px', cursor: 'pointer', fontFamily: 'inherit',
+  },
   toolBtnOn: {
     background: 'var(--dsw-alias-bg-layer-2, rgba(120,120,128,.14))',
     borderColor: 'transparent',
@@ -1842,7 +1848,7 @@ function makeWorkspace(React, openSession, ctxRef) {
     return h('div', { style: S.root },
       h('style', { dangerouslySetInnerHTML: { __html: '@keyframes wb-spin{to{transform:rotate(360deg)}}' } }),
       h('div', { style: S.topbar },
-        h('span', { style: S.title }, 'DSH 助理'),
+        /* 左边固定：三个页面标签，永远不动 */
         h('div', { style: S.tabs },
           h('button', {
             type: 'button',
@@ -1860,43 +1866,39 @@ function makeWorkspace(React, openSession, ctxRef) {
             onClick: () => setTab('brief'),
           }, '简报')),
 
-        tab === 'notes'
-          ? h('span', { style: S.chip }, `没做完 ${open}`)
-          : null,
-        tab === 'notes'
-          ? h('span', { style: { ...S.chip, background: 'rgba(63,157,82,.14)', color: '#2f7d40' } }, `已完成 ${done}${total ? ` · ${pct}%` : ''}`)
+        /* 中间：只留当前页真正需要看的状态 */
+        tab === 'notes' && open
+          ? h('span', { style: { ...S.chip, color: '#b83b38', background: 'rgba(217,83,79,.12)' } }, `${open} 未完成`)
           : null,
         tab === 'notes' && reviewCount
           ? h('span', {
             style: { ...S.chip, background: 'rgba(52,199,89,.14)', color: 'var(--dsw-alias-state-success-primary, #34c759)' },
             title: '有线程刚跑完一轮，等你验收（点卡片上的「待验收」即可）',
-          }, `待验收 ${reviewCount}`)
+          }, `${reviewCount} 待验收`)
           : null,
-        tab === 'notes' && cancelledCount
-          ? h('span', { style: S.chip }, `已放弃 ${cancelledCount}`)
-          : null,
-        cumulative
+        tab !== 'notes' && cumulative
           ? h('span', {
             style: S.chip,
-            title: `长期累计：${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天${cumulative.firstDay ? `（${cumulative.firstDay} 起）` : ''}`,
-          }, `累计 ${fmtTokens(cumulative.tokens)} tokens`)
+            title: `长期累计：${cumulative.sessions} 个线程 · 覆盖 ${cumulative.days} 天`,
+          }, `累计 ${fmtTokens(cumulative.tokens)}`)
           : null,
         h('span', { style: S.spacer }),
 
+        /* 右边：当前页能用的动作 */
         tab === 'notes'
           ? h('button', {
             type: 'button',
             onClick: () => setHideDone((v) => !v),
-            title: hideDone ? '显示已完成的便签' : '收起已完成的便签',
+            title: hideDone ? '显示已完成的便签' : '只显示没做完的便签',
             style: { ...S.toolBtn, ...(hideDone ? S.toolBtnOn : {}) },
-          }, hideDone ? `只看没做完 · 隐藏 ${done}` : '只看没做完')
+          }, hideDone ? '显示全部' : '只看没做完')
           : null,
         tab === 'notes'
           ? h('button', {
             type: 'button',
             onClick: autoArrange,
             disabled: busyArranging || total === 0,
-            title: '把所有便签重新排好：未完成在上，一行铺满再换行',
+            title: '重新排列：未完成在上，一行铺满再换行',
             style: { ...S.toolBtn, ...(busyArranging || total === 0 ? S.toolBtnOff : {}) },
           }, busyArranging ? '排列中…' : '自动排列')
           : null,
@@ -1905,31 +1907,34 @@ function makeWorkspace(React, openSession, ctxRef) {
             type: 'button',
             onClick: importSessions,
             disabled: busyImporting,
-            title: '扫描所有工作区的线程，把每个会话最后的待办清单拉成便签',
+            title: '扫描所有工作区线程，把最后的待办清单拉成便签',
             style: { ...S.toolBtn, ...(busyImporting ? S.toolBtnOff : {}) },
-          }, busyImporting ? '拉取中…' : '拉取线程任务')
+          }, busyImporting ? '拉取中…' : '拉取线程')
           : null,
-        h('button', {
-          type: 'button',
-          onClick: generateBrief,
-          disabled: busyBrief,
-          title: '扫一遍所有会话，生成一份助理简报',
-          style: { ...S.toolBtn, ...S.toolBtnPrimary, ...(busyBrief ? S.toolBtnOff : {}) },
-        }, busyBrief ? '生成中…' : '生成简报'),
-        h('button', {
-          type: 'button',
-          onClick: () => setShowSettings((v) => !v),
-          title: '简报设置：每天几点生成、快照保留多久',
-          style: { ...S.toolBtn, ...(showSettings ? S.toolBtnOn : {}) },
-        }, '设置'),
+        tab === 'brief'
+          ? h('button', {
+            type: 'button',
+            onClick: generateBrief,
+            disabled: busyBrief,
+            title: '扫一遍所有会话，生成今天的简报',
+            style: { ...S.toolBtn, ...S.toolBtnPrimary, ...(busyBrief ? S.toolBtnOff : {}) },
+          }, busyBrief ? '生成中…' : '生成简报')
+          : null,
         tab === 'notes'
           ? h('button', {
             type: 'button',
             onClick: createNote,
             title: '新建一张便签',
             style: { ...S.toolBtn, ...S.toolBtnPrimary },
-          }, '＋ 新建便签')
-          : null),
+          }, '＋ 新建')
+          : null,
+        h('button', {
+          type: 'button',
+          onClick: () => setShowSettings((v) => !v),
+          title: '设置：每天几点生成简报、快照保留多久',
+          style: { ...S.iconBtn, ...(showSettings ? S.toolBtnOn : {}) },
+        }, '⚙')),
+
 
 
       tab === 'week'

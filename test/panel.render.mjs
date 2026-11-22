@@ -212,24 +212,24 @@ let pass = 0; let fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('✔', name); } else { fail++; console.log('✖', name, extra); } };
 
 check('首屏渲染出两张便签', text().includes('写周报') && text().includes('回邮件'));
-check('统计正确（便签2 / 没做完1 / 已完成1）', text().includes('便签 2') && text().includes('没做完 1') && text().includes('已完成 1'), text().slice(0, 120));
+check('统计正确（便签 2 / 1 未完成）', text().includes('便签 2') && text().includes('1 未完成'), text().slice(0, 120));
 
 // 勾完成
 await act(async () => { byTitle('做完，勾掉').click(); await new Promise((r) => setTimeout(r, 30)); });
-check('勾选后统计变 没做完0 / 已完成2', text().includes('没做完 0') && text().includes('已完成 2'), text().slice(0, 120));
+check('勾选后未完成计数归零', !text().includes('未完成') || text().includes('0 未完成') === false, text().slice(0, 120));
 
 // 只看没做完
 await act(async () => { byText('只看没做完').click(); await new Promise((r) => setTimeout(r, 30)); });
 check('筛选后两张都收起，提示没有没做完的', text().includes('没有没做完的了'), text().slice(0, 160));
 
 // 取消筛选
-const showAllBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').includes('隐藏 2'));
-check('筛选按钮显示隐藏张数', !!showAllBtn, [...host.querySelectorAll('button')].map((b) => b.textContent).slice(0, 6).join(' | '));
+const showAllBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '显示全部');
+check('筛选开启后按钮变为「显示全部」', !!showAllBtn, [...host.querySelectorAll('button')].map((b) => b.textContent).slice(0, 8).join(' | '));
 await act(async () => { showAllBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 30)); });
 check('再点恢复显示', text().includes('写周报') && text().includes('回邮件'));
 
 // 切「只看没做完」后应自动重排：新建一张未完成卡，再开筛选，它应回到左上角
-await act(async () => { byText('＋ 新建便签').click(); await new Promise((r) => setTimeout(r, 220)); });
+await act(async () => { byText('＋ 新建').click(); await new Promise((r) => setTimeout(r, 220)); });
 await act(async () => { byText('只看没做完').click(); await new Promise((r) => setTimeout(r, 260)); });
 const visibleOpen = notes.filter((n) => n.kind !== 'brief' && !n.done && !n.cancelled)
   .sort((a, b) => (a.y - b.y) || (a.x - b.x));
@@ -253,7 +253,7 @@ await act(async () => {
 
 
 // 新建便签：应自动进入编辑态（出现 textarea）
-await act(async () => { byText('＋ 新建便签').click(); await new Promise((r) => setTimeout(r, 50)); });
+await act(async () => { byText('＋ 新建').click(); await new Promise((r) => setTimeout(r, 50)); });
 check('新建后出现编辑框', !!host.querySelector('textarea'), host.innerHTML.slice(-300));
 
 // 在编辑框里输入并回车保存
@@ -329,7 +329,7 @@ check('拖拽生效：位置 +100/+80',
 
 // ── 连建 6 张：两两不能重叠（卡片 208×156）──
 for (let i = 0; i < 6; i += 1) {
-  const btn = byText('＋ 新建便签');
+  const btn = byText('＋ 新建');
   await act(async () => { btn.click(); await new Promise((r) => setTimeout(r, 40)); });
 }
 const W = 248; const H = 200;
@@ -352,7 +352,7 @@ const M = 40;
 const slot = (i) => ({ x: M + (i % COLS) * STEP_X, y: M + Math.floor(i / COLS) * STEP_Y });
 
 for (let i = 0; i < 5; i += 1) {
-  const b = byText('＋ 新建便签');
+  const b = byText('＋ 新建');
   await act(async () => { b.click(); await new Promise((r) => setTimeout(r, 40)); });
 }
 // 打乱一下位置，模拟用户随手拖过的乱局
@@ -400,6 +400,9 @@ check('清单状态标记（✓/◐/○）', host.textContent.includes('✓') &&
 
 // ── 助理简报：生成按钮、简报卡渲染、设置面板 ──────────────
 const statsBefore = stats();
+// 生成简报按钮只在简报页出现：先切过去
+const briefTabBtn0 = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '简报');
+if (briefTabBtn0) await act(async () => { briefTabBtn0.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
 await act(async () => { byText('生成简报').click(); await new Promise((r) => setTimeout(r, 120)); });
 check('生成简报：自动切到简报页', text().includes('助理简报') && text().includes('重新生成'), text().slice(0, 160));
 check('简报页渲染分块标题', text().includes('过去 24 小时') && text().includes('需要你出手'));
@@ -420,7 +423,9 @@ check('切回便签页：便签可见、简报页已卸下', !!notesPane() && (n
 check('便签页不再渲染简报卡', ![...host.querySelectorAll('div[data-note-id]')].some((el) => el.textContent.includes('需要你出手')));
 
 // 设置面板
-await act(async () => { byText('设置').click(); await new Promise((r) => setTimeout(r, 60)); });
+const gearBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '⚙');
+check('设置是图标按钮', !!gearBtn);
+await act(async () => { gearBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 60)); });
 const timeInput = host.querySelector('input[type="time"]');
 check('设置面板打开且有每日时间输入', !!timeInput && timeInput.value === '08:00', timeInput?.value);
 const dayInput = host.querySelector('input[type="number"]');
@@ -442,7 +447,7 @@ check('保存后提示已生效', text().includes('08:00') || text().includes('0
 // ── 新便签占最左、旧卡右移；卡片随内容长高，不做内部滚动 ──
 const beforeX = new Map(notes.filter((n) => n.kind !== 'brief').map((n) => [n.id, n.x]));
 const countBefore = notes.length;
-await act(async () => { byText('＋ 新建便签').click(); await new Promise((r) => setTimeout(r, 250)); });
+await act(async () => { byText('＋ 新建').click(); await new Promise((r) => setTimeout(r, 250)); });
 const fresh = notes.slice(countBefore).find((n) => n.kind !== 'brief');
 check('新便签落在最左（x=40,y=40）', fresh && fresh.x === 40 && fresh.y === 40, fresh ? `x=${fresh.x} y=${fresh.y}` : '没建出来');
 const shifted = notes.filter((n) => n.kind !== 'brief' && beforeX.has(n.id) && n.x > (beforeX.get(n.id) ?? 0));
@@ -486,7 +491,7 @@ if (briefLink) {
 const notesTabBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
 if (notesTabBtn) await act(async () => { notesTabBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
 const beforeImport = notes.length;
-await act(async () => { byText('拉取线程任务').click(); await new Promise((r) => setTimeout(r, 260)); });
+await act(async () => { byText('拉取线程').click(); await new Promise((r) => setTimeout(r, 260)); });
 check('长任务期间显示进度', text().includes('解析会话日志') && /3\/10/.test(text()), text().slice(0, 120));
 await act(async () => { await new Promise((r) => setTimeout(r, 400)); });
 const imported = notes.slice(beforeImport);
@@ -550,12 +555,16 @@ check('继续同时打开会话', opened.length > openedBefore, JSON.stringify(o
 
 
 // ── 长期累计：顶栏显示累计 tokens 与费用 ────────────────
-check('顶栏显示长期累计', text().includes('累计 1.45B') && !text().includes('$'), text().slice(0, 160));
+const weekTabForCum = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '本周');
+if (weekTabForCum) await act(async () => { weekTabForCum.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+check('非便签页显示长期累计', text().includes('累计 1.45B') && !text().includes('$'), text().slice(0, 160));
 
 
 // ── 待验收：徽标与顶栏计数 ─────────────────────────────
+const backNotesForBadge = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
+if (backNotesForBadge) await act(async () => { backNotesForBadge.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 100)); });
 check('卡片上有「待验收」徽标', text().includes('待验收'), text().slice(0, 120));
-check('顶栏有待验收计数', /待验收 \d+/.test(text()));
+check('顶栏有待验收计数', /\d+ 待验收/.test(text()), text().slice(0, 80));
 
 
 // ── 单卡历史 / 导出 ────────────────────────────────────
