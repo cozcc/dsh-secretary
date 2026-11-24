@@ -1,8 +1,8 @@
 # dsh-secretary · 项目约定
 
-**已立项**：L0（本文件）已自动加载。开工执行 **L1**：读 `docs/STATUS.md` 全文 +
-`docs/ITERATIONS.md` 最后 2 条。只有要改目标 / 接口面 / 发布时，才读 `docs/CHARTER.md`
-第 2/3/5 节（L2）。
+**已立项**：L0（本文件）已自动加载。默认先看 **L1**：`docs/STATUS.md` 全文 +
+`docs/ITERATIONS.md` 最后 2 条（省得问人；任务跟项目无关可跳过）。要改目标 / 接口面 / 发布时
+再翻 `docs/CHARTER.md` 第 2/3/5 节（L2）。
 
 ## 身份
 
@@ -28,6 +28,7 @@ node --test test/*.test.mjs   # 当前基线：44 passed
 node build-client.mjs         # 改了 src/client.mjs 之后必须重建，否则面板不更新
 ```
 
-## 收尾
+## 记录（可选）
 
-改完任何项目文件，按 `project-lifecycle` 追加一条 IT 并更新 `docs/STATUS.md`，否则视为没做完。
+改完项目文件可顺手按 `project-lifecycle` 补一条 IT 并更新 `docs/STATUS.md`；
+不记也不影响交付——记忆是给下次省事的，不是完成条件。
