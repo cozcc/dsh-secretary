@@ -40,3 +40,17 @@
 - 验证：`node ~/.agents/skills/project-lifecycle/scripts/check.mjs .` → 通过（2 条 IT，0 错误）；
   实测 L0+L1 = 3925 字符，旧规则 4598 字符（-15%），且 CHARTER（2491 字符）移出例行路径
 - 遗留：其余 4 个已立项项目还没做红线前置，等各自下次迭代顺带做
+
+## IT-003 · 2026-11-26 · 交接复盘：把"跳转"从猜改成可验证，并加诊断
+
+- 版本：dsh-secretary 0.2.0 @ HEAD
+- 目标：持有者复盘整个项目后重排优先级；修掉反复返工的跳转问题；建立"承诺可自证"的机制（CHARTER G6）
+- 改动：`src/http.mjs`（新增 `GET /diag`、`PLUGIN_VERSION`）；`src/client.mjs`（跳转改为 openSession 优先、失败才收编；菜单加「? 诊断」抽屉；记录最近一次跳转结果）；`test/http.test.mjs`、`test/panel.render.mjs`；`docs/CHARTER.md`（新增 G6/A5/N6 与「宿主事实」节）；版本 0.2.0
+- 决策：
+  1. 跳转先调 `uiWorkspace.openSession`，**不再预先用 `sessions.binding()` 判断**——该接口对冷会话为空，是我们连续误判的根源；
+  2. 读 DSH 源码确认 `openSession` = `retain()`，未知 id 抛错、不造空白会话；造空白会话的是 `openWorkspace/connectBlank`，上一版在 openSession 前调它是真凶；
+  3. 面板加「诊断」抽屉，把能力面/数据规模/最近一次跳转结果一次取全，替代"口述现象"；
+  4. 放弃在无头环境里证明真机导航，改为结构与诊断可证据 + 用户一次点击确认。
+- 接口面：新增只读路由 `GET /diag`（新增，不改既有路由语义）；版本 minor bump 到 0.2.0；CHARTER 第 2/3/4 节新增条目已按改版流程记录
+- 验证：`node --test test/*.test.mjs` → 45 passed；面板无头 → 86 passed；线上 `/diag` 返回版本与 counts
+- 遗留：跳转两条路径未在真机确认（用户点击后方可收口）；R3 归档页、R4 npm 发布未开工

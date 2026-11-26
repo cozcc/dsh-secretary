@@ -174,7 +174,11 @@ const ctx = {
   effect: (f) => f(),
   get: (key) => {
     if (key === 'uiWorkspace') return {
-      openSession: (id) => { opened.push(String(id)); },
+      // 真实 DSH 里 openSession → sessions.retain()，认不出的 id 会抛错
+      openSession: (id) => {
+        if (String(id) === 'sess-3') throw new Error('unknown session');
+        opened.push(String(id));
+      },
       openWorkspace: (id) => { openedWorkspace.push(String(id)); },
     };
     if (key === 'sessions') return { binding: (id) => (String(id).startsWith('session-') ? undefined : { session: {} }) };

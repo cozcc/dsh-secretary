@@ -157,3 +157,16 @@ test('收编会话：按 cwd 建工作区并 attach，然后就能打开', async
   assert.equal(r.body.created, true);
   assert.deepEqual(attached, [['ws-new', 'session-abc-123']], '会话必须被 attach 到新工作区');
 });
+
+
+test('诊断：报告版本、数据目录、数据规模与宿主能力', async () => {
+  const s = makeServer({ admit: () => ownerPeer });
+  await s.call('POST', '/workbench/api/note', { 'content-type': 'application/json' }, { text: '诊断用例' });
+  const r = await s.call('GET', '/workbench/api/diag', {});
+  assert.equal(r.status, 200);
+  assert.match(String(r.body.version), /^\d+\.\d+\.\d+/);
+  assert.ok(r.body.dataDir, '要有数据目录');
+  assert.equal(typeof r.body.counts.notes, 'number');
+  assert.equal(r.body.counts.notes, 1);
+  assert.equal(typeof r.body.capabilities.sessionQuery, 'boolean');
+});

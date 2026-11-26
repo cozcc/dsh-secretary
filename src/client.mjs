@@ -500,6 +500,19 @@ const S = {
     flex: '1', display: 'flex', flexDirection: 'column',
     alignItems: 'center', justifyContent: 'center', gap: '6px', textAlign: 'center',
   },
+  /* 诊断抽屉 */
+  diagPanel: {
+    position: 'absolute', top: '56px', right: '14px', zIndex: 42, width: '420px', maxHeight: '70%',
+    display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px 14px',
+    borderRadius: '12px', background: CARD, border: `0.5px solid ${HAIRLINE}`,
+    boxShadow: '0 12px 32px rgba(0,0,0,.18)', overflow: 'hidden',
+  },
+  diagPre: {
+    margin: 0, padding: '10px', borderRadius: '8px', background: INSET,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '10.5px',
+    lineHeight: '15px', color: TEXT_1, overflow: 'auto', whiteSpace: 'pre-wrap',
+  },
+
   /* 功能菜单 */
   menuOverlay: { position: 'fixed', inset: '0', zIndex: 40 },
   menu: {
@@ -625,6 +638,7 @@ function createApi() {
     getSettings: () => req('/settings'),
     getCumulative: () => req('/cumulative'),
     getWeekly: () => req('/weekly'),
+    getDiag: () => req('/diag'),
     getBriefs: () => req('/briefs'),
     getBrief: (date) => req(`/brief?date=${encodeURIComponent(date)}`),
     exportNote: async (id) => {
@@ -1285,6 +1299,9 @@ function makeWorkspace(React, openSession, ctxRef) {
     const [unlisted, setUnlisted] = React.useState(null);
     /** 左侧固定的「菜单」：功能开关都收在这里，顶栏不再堆按钮。 */
     const [menuOpen, setMenuOpen] = React.useState(false);
+    /** 诊断抽屉：能力面 + 数据规模 + 最近一次跳转结果。 */
+    const [showDiag, setShowDiag] = React.useState(false);
+    const [diag, setDiag] = React.useState(null);
     /** 两个页面：便签画布 / 助理简报。 */
     const [tab, setTab] = React.useState('notes');
     /** 本周看板数据（会话/token/完成任务）。 */
@@ -1642,6 +1659,16 @@ function makeWorkspace(React, openSession, ctxRef) {
       }
     };
 
+    /** 打开诊断时现取一份宿主事实。 */
+    const loadDiag = React.useCallback(async () => {
+      try {
+        const data = await api.getDiag();
+        setDiag({ ...data, lastNav: globalThis.__SECRETARY_LAST_NAV__ ?? null, at: Date.now() });
+      } catch (e) {
+        setDiag({ error: e.message, lastNav: globalThis.__SECRETARY_LAST_NAV__ ?? null, at: Date.now() });
+      }
+    }, []);
+
     /** 重新取一次本周统计（导入/生成简报之后调用）。 */
     const refreshWeekly = React.useCallback(async () => {
       try { const data = await api.getWeekly(); if (data) setWeekly(data); } catch { /* 忽略 */ }
@@ -1955,6 +1982,15 @@ function makeWorkspace(React, openSession, ctxRef) {
           onOpenSession: openSession,
         })
         : null,
+      showDiag
+        ? h('div', { style: S.diagPanel },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('span', { style: { fontSize: '12.5px', fontWeight: 600 } }, '诊断'),
+            h('span', { style: S.spacer }),
+            h('button', { type: 'button', style: S.crashBtn, onClick: () => { void loadDiag(); } }, '刷新'),
+            h('button', { type: 'button', style: S.crashBtn, onClick: () => setShowDiag(false) }, '关闭')),
+          h('pre', { style: S.diagPre }, diag ? JSON.stringify(diag, null, 2) : '加载中…'))
+        : null,
       menuOpen
         ? h('div', { style: S.menuOverlay, onClick: () => setMenuOpen(false) })
         : null,
@@ -2220,18 +2256,22 @@ function makeNavigator(ctx, resolveId) {
   const grab = (name) => (typeof ctx.get === 'function' ? ctx.get(name) : undefined);
 
   return async (sessionId) => {
-    if (!sessionId) return 'not-found';
+    const done = (result) => {
+      try { globalThis.__SECRETARY_LAST_NAV__ = { at: Date.now(), sessionId: String(sessionId), ...result }; } catch { /* 忽略 */ }
+      return result;
+    };
+    if (!sessionId) return done({ verdict: 'not-found' });
     const uiWorkspace = grab('uiWorkspace');
 
     let target = String(sessionId);
+    let cwd = '';
     if (typeof resolveId === 'function') {
       try {
         const resolved = await resolveId(String(sessionId));
-        if (resolved === null) return { verdict: 'not-found' };      // 宿主说：这个会话不存在
+        if (resolved === null) return done({ verdict: 'not-found' });  // 宿主说：这个会话不存在
         if (resolved) {
           target = resolved.id;
-          // 没登记在任何工作区里 → 侧边栏没有它，openSession 只会开出空白会话
-          if (!resolved.listed) return { verdict: 'unlisted', cwd: resolved.cwd };
+          cwd = resolved.cwd || '';
         }
       } catch {
         // 解析失败：按原样尝试（老版本宿主没有这个接口）
@@ -2240,8 +2280,10 @@ function makeNavigator(ctx, resolveId) {
 
     try {
       if (uiWorkspace && typeof uiWorkspace.openSession === 'function') {
+        // openSession 内部是 sessions.retain(target) → 认不出的 id 会直接抛错，
+        // 也就是说它**不会**凭空造一个空白会话；真的失败才降级到「收编」。
         uiWorkspace.openSession(target);
-        return { verdict: 'ok' };
+        return done({ verdict: 'ok', target });
       }
       const layout = grab('layout');
       if (layout && typeof layout.selectPanel === 'function') {
@@ -2250,8 +2292,10 @@ function makeNavigator(ctx, resolveId) {
       }
     } catch (error) {
       console.error('[secretary] 打开会话失败', error);
+      if (cwd) return done({ verdict: 'unlisted', cwd, error: String(error?.message ?? error) });
+      return done({ verdict: 'not-found', error: String(error?.message ?? error) });
     }
-    return { verdict: 'unavailable' };
+    return done({ verdict: 'unavailable' });
   };
 }
 

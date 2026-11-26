@@ -1,6 +1,6 @@
 {
   "name": "dsh-secretary",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Your DSH secretary: a sticky-note canvas plus scheduled briefings that summarize every thread's goal, progress, todos and token cost.",
   "type": "module",

@@ -9,6 +9,7 @@
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { stats, importSessions, applyPositions, findNote, noteToMarkdown, removeNotesBySources } from './board.mjs';
 import { scanSessions } from './sessions.mjs';
@@ -20,6 +21,9 @@ import { buildWeekly } from './weekly.mjs';
 import { loadLedger, totals as ledgerTotals } from './cumulative.mjs';
 
 export const ROUTE_PREFIX = '/workbench/api';
+
+/** 插件版本：build-client.mjs 会把这里替换成 package.json 里的版本。 */
+export const PLUGIN_VERSION = '0.2.0';
 export const TOKEN_GLOBAL_KEY = '__WORKBENCH_TOKEN__';
 const TOKEN_FILE = 'api-token';
 
@@ -254,6 +258,48 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
                 workspaceId: String(workspace?.id ?? ''),
                 title: String(workspace?.title ?? ''),
                 created,
+              });
+            }
+
+            /**
+             * 诊断：插件看到的能力面与数据规模。
+             * 用户点「菜单 → 诊断」即可把这一段发出来，避免每次靠描述猜。
+             */
+            if (route === '/diag' && method === 'GET') {
+              const has = (k) => {
+                try { return Boolean(typeof ctx.get === 'function' && ctx.get(k)); } catch { return false; }
+              };
+              const board = store.read();
+              const notes = board.notes ?? [];
+              let ledgerDays = 0;
+              let ledgerSessions = 0;
+              try {
+                const ledger = JSON.parse(fs.readFileSync(path.join(dataDir, 'cumulative.json'), 'utf8'));
+                ledgerSessions = Object.keys(ledger.sessions ?? {}).length;
+                const days = new Set();
+                for (const rec of Object.values(ledger.sessions ?? {})) {
+                  for (const d of Object.keys(rec?.days ?? {})) days.add(d);
+                }
+                ledgerDays = days.size;
+              } catch { /* 还没有账本 */ }
+              return json(res, 200, {
+                version: PLUGIN_VERSION,
+                dataDir,
+                home: os.homedir(),
+                counts: {
+                  notes: notes.filter((n) => n.kind !== 'brief').length,
+                  briefs: notes.filter((n) => n.kind === 'brief').length,
+                  open: stats(board).open,
+                  done: stats(board).done,
+                  ledgerSessions,
+                  ledgerDays,
+                },
+                capabilities: {
+                  sessionQuery: has('sessionQuery'),
+                  workspaceRegistry: has('workspaceRegistry'),
+                  sessionController: has('sessionController'),
+                },
+                node: process.version,
               });
             }
 
