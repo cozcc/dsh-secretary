@@ -1,5 +1,7 @@
 # dsh-secretary
 
+[![CI](https://github.com/cozcc/dsh-secretary/actions/workflows/ci.yml/badge.svg)](https://github.com/cozcc/dsh-secretary/actions/workflows/ci.yml)
+
 **Your DSH secretary** — a sticky-note canvas plus scheduled briefings that tell you what every DeepSeek Harness thread is doing, what still needs you, and what it costs.
 
 > This is a **DSH plugin**, not a standalone application. It runs inside DeepSeek Harness: the UI is a panel in the DSH sidebar, the service is a route on DSH's own web server, and there is no separate process or port.

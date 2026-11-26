@@ -1,8 +1,7 @@
 {
   "name": "dsh-secretary",
   "version": "0.2.0",
-  "private": true,
-  "description": "Your DSH secretary: a sticky-note canvas plus scheduled briefings that summarize every thread's goal, progress, todos and token cost.",
+  "description": "DSH 侧边栏里的个人秘书：便签画布 + 线程任务卡 + 定时简报/周报 + 永久 token 台账（不估费用）。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -21,7 +20,12 @@
     "locale",
     "icon.svg",
     "cordis.patch.yml",
-    "build-client.mjs"
+    "build-client.mjs",
+    "docs",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "license": "MIT",
   "dsh": {
@@ -38,7 +42,9 @@
   },
   "scripts": {
     "build": "node build-client.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "test:panel": "node test/panel.render.mjs",
+    "prepublishOnly": "node build-client.mjs && node --test test/*.test.mjs"
   },
   "author": "cozcc",
   "repository": {
@@ -53,11 +59,13 @@
     "dsh",
     "dsh-plugin",
     "deepseek-harness",
-    "kanban",
     "sticky-notes",
     "assistant",
     "secretary",
     "briefing",
-    "token-cost"
-  ]
+    "tokens"
+  ],
+  "engines": {
+    "node": ">=22"
+  }
 }
