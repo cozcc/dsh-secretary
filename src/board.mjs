@@ -131,6 +131,8 @@ export function normalizeBoard(raw) {
         kind: 'session',
         id: String(n.source.id),
         title: clampRaw(n.source.title),
+        // 原始（未清洗）标题：只用于追溯与导出，卡片上显示的是清洗后的 title
+        ...(n.source.titleRaw ? { titleRaw: clampRaw(n.source.titleRaw).slice(0, 400) } : {}),
         workspace: clampRaw(n.source.workspace),
         updatedAt: Number(n.source.updatedAt) || 0,
         syncedAt: Number(n.source.syncedAt) || 0,

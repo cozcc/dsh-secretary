@@ -355,3 +355,21 @@ test('标题清洗：去 markdown、去前缀、去 URL、截断', () => {
   // 短标题原样保留
   assert.equal(sanitizeTitle('检查DSH闪退原因'), '检查DSH闪退原因');
 });
+
+
+test('原始标题 titleRaw 会落盘并在往返后保留', () => {
+  const board = normalizeBoard({});
+  importSessions(board, [{
+    sessionId: 's1',
+    title: '**会话标题：** 执行 OXO_任务 并提交验收，这是一段很长的原始标题用于验证清洗与保留',
+    updatedAt: 1,
+    todos: [{ content: 'x', status: 'pending' }],
+  }], 100);
+  const note = board.notes[0];
+  assert.ok(note.text.length <= 29, `卡片标题要短：${note.text}`);
+  assert.ok(!note.text.includes('**'), '卡片标题不该有 markdown');
+  assert.ok(note.source.titleRaw.includes('**会话标题：**'), '原始标题要保留');
+  // 往返（模拟读盘→写盘）后仍在
+  const again = normalizeBoard(JSON.parse(JSON.stringify(board)));
+  assert.ok(again.notes[0].source.titleRaw?.includes('会话标题'), 'titleRaw 必须能持久化');
+});
