@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # 先构建：构建脚本自己会 apply 一遍宿主产物（清单漂移会在这里失败）
+      - name: Build bundles + host smoke
+        run: node build-client.mjs
+      - name: Host tests
+        run: node --test test/*.test.mjs
+      # 面板回归需要 jsdom/react，装一次再跑
+      - name: Panel regression (headless mount)
+        run: |
+          mkdir -p "$RUNNER_TEMP/wb-run" && cd "$RUNNER_TEMP/wb-run"
+          printf '{"name":"wb-run","private":true,"type":"module"}' > package.json
+          npm i --silent --no-audit --no-fund react@19 react-dom@19 jsdom@25
+          cp "$GITHUB_WORKSPACE/test/panel.render.mjs" ./probe.mjs
+          WB_BUNDLE="$GITHUB_WORKSPACE/lib/client.js" node probe.mjs
+      - name: Build output is committed
+        run: |
+          git diff --exit-code -- lib/ || (echo "lib/ 与 src/ 不一致：本地忘了跑 build-client.mjs" && exit 1)
