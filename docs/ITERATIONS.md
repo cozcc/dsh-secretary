@@ -54,3 +54,16 @@
 - 接口面：新增只读路由 `GET /diag`（新增，不改既有路由语义）；版本 minor bump 到 0.2.0；CHARTER 第 2/3/4 节新增条目已按改版流程记录
 - 验证：`node --test test/*.test.mjs` → 45 passed；面板无头 → 86 passed；线上 `/diag` 返回版本与 counts
 - 遗留：跳转两条路径未在真机确认（用户点击后方可收口）；R3 归档页、R4 npm 发布未开工
+
+## IT-004 · 2026-11-26 · R4 发布化：归档、CI、包自检
+
+- 版本：dsh-secretary 0.2.0 @ 512eb2b
+- 目标：让「画布长期只留在办」（R3）+ 让项目可发布、可复现（R4）
+- 改动：`src/board.mjs`（ARCHIVE_AFTER_DAYS/isArchived/setPinned/sanitizeTitle）；`src/http.mjs`（/note/pin、archived 标记、/diag）；`src/client.mjs`（归档页、标题清洗接入、待办折叠、默认只看没做完、诊断抽屉、openSession 优先）；`build-client.mjs`（导出清单单一来源 + 构建后宿主自检）；`.github/workflows/ci.yml`（构建自检 + 宿主测试 + 无头面板回归 + lib 同步校验）；`CHANGELOG.md`、`docs/RELEASE.md`；package.json（去 private、engines、files、prepublishOnly）
+- 决策：
+  1. 归档**算出来**而不是搬数据（`doneAt`/`updatedAt` 比对），零迁移风险；钉住用 `note.pinned` 表达「别归档」；
+  2. 构建脚本改为**单一导出清单**，并加**构建后 apply 自检**——此前两次「上线即坏」都是清单漂移（PRICES、isArchived），靠人记住同步两份清单不可靠；
+  3. 打包自检（`npm pack` → 临时目录安装 → import）列为发布前置，证明发布物可用而不是「应该可用」。
+- 接口面：新增 `GET /diag`、`GET /weekly`、`POST /note/pin`、`POST /session/adopt`、`GET /session/resolve`（内部辅助接口，不进 CHARTER 第 5 节对外契约）；`archived` 为 `/board` 派生字段；`note.pinned` 为新持久化字段（旧数据默认为 false，向后兼容）
+- 验证：`node build-client.mjs` → 宿主自检通过；宿主 50 passed；面板 94 passed；GitHub Actions 两次运行 success（Node 22/24，日志可见「结果：94 通过 / 0 失败」）；`npm pack` → 28 文件 / 143 kB，临时安装后 `apply` 为函数、资源齐全
+- 遗留：npm publish 未执行（需维护者 `npm login`，代理不代做）；README 截图未补（无法真实截取面板，宁缺勿造）
