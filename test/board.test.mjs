@@ -11,6 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  isArchived,
+  setPinned,
+  ARCHIVE_AFTER_DAYS,
   sanitizeTitle,
   applyPositions,
   removeNotesBySources,
@@ -372,4 +375,26 @@ test('原始标题 titleRaw 会落盘并在往返后保留', () => {
   // 往返（模拟读盘→写盘）后仍在
   const again = normalizeBoard(JSON.parse(JSON.stringify(board)));
   assert.ok(again.notes[0].source.titleRaw?.includes('会话标题'), 'titleRaw 必须能持久化');
+});
+
+
+test('归档判定：完成超过 7 天进归档，钉住的不进', () => {
+  const now = Date.parse('2026-11-26T12:00:00+08:00');
+  const day = 86_400_000;
+  const done = (ageDays, extra = {}) => ({ id: 'x', text: 't', done: true, doneAt: now - ageDays * day, updatedAt: now, ...extra });
+
+  assert.equal(isArchived(done(1), now), false, '1 天内不归档');
+  assert.equal(isArchived(done(ARCHIVE_AFTER_DAYS + 1), now), true, '超过 7 天归档');
+  assert.equal(isArchived(done(30, { pinned: true }), now), false, '钉住的不归档');
+  assert.equal(isArchived({ id: 'y', text: 't', done: false, cancelled: false, updatedAt: now - 30 * day }, now), false, '未完成永不归档');
+  assert.equal(isArchived({ id: 'z', text: 't', done: false, cancelled: true, updatedAt: now - 30 * day }, now), true, '已放弃的也归档');
+});
+
+test('钉回画布：pinned 写入并留一条历史', () => {
+  const board = normalizeBoard({});
+  importSessions(board, [{ sessionId: 's1', title: 'T', updatedAt: 1, todos: [{ content: 'a', status: 'completed' }] }], 100);
+  const id = board.notes[0].id;
+  setPinned(board, id, true, 2000);
+  assert.equal(board.notes[0].pinned, true);
+  assert.ok(board.notes[0].history.some((h) => h.kind === 'pin'));
 });

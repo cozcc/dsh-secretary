@@ -36,7 +36,13 @@
 - Runs automatically at a configurable local time (default **08:00**), and catches up at startup if today's briefing is missing
 - Snapshots live in `briefs/YYYY-MM-DD.json`, pruned after 90 days (configurable)
 
-### 4. This-week dashboard
+### 4. Archive keeps the canvas about *now*
+
+Finished or abandoned cards older than seven days leave the canvas and collect on an
+`归档` page, grouped by month, with a 钉回 action that pins one back permanently.
+Archiving is computed from `doneAt`/`updatedAt`, so nothing is deleted and no migration runs.
+
+### 5. This-week dashboard
 
 A third page shows the week (Monday → Sunday) with three big numbers and momentum bars:
 
@@ -46,12 +52,12 @@ A third page shows the week (Monday → Sunday) with three big numbers and momen
 
 Token and session numbers come from the per-day ledger, so the week view needs no extra scanning.
 
-### 5. Long-term totals that never expire
+### 6. Long-term totals that never expire
 - `cumulative.json` keeps a per-session, per-day ledger forever (brief snapshots are pruned, this is not)
 - Idempotent: re-reading a thread replaces its bucket instead of adding again
 - Shown in the top bar (`累计 2.86B tokens`) and as a section in every briefing
 
-### 6. Real-time review badges
+### 7. Real-time review badges
 - When a thread finishes a turn (`turn/end` with `completed`), its card is flagged **待验收** immediately — no scan required
 - Click the badge to accept it (same as ticking the note)
 

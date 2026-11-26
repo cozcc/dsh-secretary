@@ -170,3 +170,25 @@ test('诊断：报告版本、数据目录、数据规模与宿主能力', async
   assert.equal(r.body.counts.notes, 1);
   assert.equal(typeof r.body.capabilities.sessionQuery, 'boolean');
 });
+
+
+test('归档标记与钉住路由', async () => {
+  const s = makeServer({ admit: () => ownerPeer });
+  const created = await s.call('POST', '/workbench/api/note', { 'content-type': 'application/json' }, { text: '要归档的卡' });
+  const id = created.body.board.notes.find((n) => n.text === '要归档的卡').id;
+  // 标成很久以前完成
+  await s.store.mutate((b) => {
+    const n = b.notes.find((x) => x.id === id);
+    n.done = true;
+    n.doneAt = Date.now() - 30 * 86_400_000;
+    n.updatedAt = Date.now() - 30 * 86_400_000;
+  });
+  const board = await s.call('GET', '/workbench/api/board', {});
+  assert.equal(board.body.board.notes.find((n) => n.id === id).archived, true);
+  assert.equal(board.body.stats.archived, 1);
+
+  const pinned = await s.call('POST', '/workbench/api/note/pin', { 'content-type': 'application/json' }, { id, pinned: true });
+  assert.equal(pinned.status, 200);
+  assert.equal(pinned.body.note.pinned, true);
+  assert.equal(pinned.body.note.archived, false, '钉住后不再是归档态');
+});

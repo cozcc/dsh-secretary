@@ -46,7 +46,12 @@ const { createRoot } = await import('react-dom/client');
 // —— 假服务端：和 src/http.mjs 的语义一致 ——
 let seq = 0;
 const mk = (text, extra = {}) => ({ id: `n${++seq}`, text, done: false, x: 60, y: 60, color: 'yellow', createdAt: Date.now(), updatedAt: Date.now(), doneAt: null, updates: [], ...extra });
-let notes = [mk('写周报', { x: 40, y: 40, updates: [{ id: 'u1', text: '写了一半', at: Date.now() }] }), mk('回邮件', { done: true, doneAt: Date.now(), x: 328, y: 40 })];
+let notes = [
+  mk('写周报', { x: 40, y: 40, updates: [{ id: 'u1', text: '写了一半', at: Date.now() }] }),
+  mk('回邮件', { done: true, doneAt: Date.now(), x: 328, y: 40 }),
+  // 30 天前完成 → 归档态：不该上画布，应出现在归档页
+  mk('早就做完的卡', { done: true, doneAt: Date.now() - 30 * 86400e3, archived: true, x: 900, y: 600 }),
+];
 const stats = () => {
   const tasks = notes.filter((n) => n.kind !== 'brief');
   return { total: tasks.length, done: tasks.filter((n) => n.done).length, open: tasks.filter((n) => !n.done).length, briefs: notes.length - tasks.length };
@@ -693,6 +698,19 @@ check('本周页不显示便签画布', !host.querySelector('div[data-page="note
 check('本周页内容在', (host.textContent || '').includes('本周进度'));
 const backNotes2 = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
 if (backNotes2) await act(async () => { backNotes2.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
+
+
+// ── 归档：完成超 7 天的不在画布，进归档页且可钉回 ──────
+check('归档卡不在画布上', ![...host.querySelectorAll('div[data-note-id]')].some((el) => (el.textContent || '').includes('早就做完的卡')));
+const archiveTab = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('归档'));
+check('顶栏有「归档」标签', !!archiveTab, [...host.querySelectorAll('button')].map((b) => b.textContent).slice(0, 8).join(' | '));
+if (archiveTab) await act(async () => { archiveTab.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+check('归档页列出已归档的卡', text().includes('早就做完的卡') && /已归档/.test(text()), text().slice(0, 160));
+const pinBtn = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim() === '钉回');
+check('归档行有「钉回」按钮', !!pinBtn);
+if (pinBtn) await act(async () => { pinBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 120)); });
+const backNotesArch = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').trim().startsWith('便签'));
+if (backNotesArch) await act(async () => { backNotesArch.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
 
 console.log(`\n结果：${pass} 通过 / ${fail} 失败`);
 console.log('接口调用：', calls.join(' → '));

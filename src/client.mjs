@@ -517,6 +517,14 @@ const S = {
     lineHeight: '15px', color: TEXT_1, overflow: 'auto', whiteSpace: 'pre-wrap',
   },
 
+  /* 归档页 */
+  archiveRow: { display: 'flex', gap: '8px', alignItems: 'baseline', padding: '3px 0' },
+  archivePin: {
+    flex: 'none', padding: '1px 8px', borderRadius: '6px', cursor: 'pointer',
+    border: `0.5px solid ${HAIRLINE}`, background: 'transparent',
+    color: TEXT_2, fontSize: '10.5px', fontFamily: 'inherit',
+  },
+
   /* 功能菜单 */
   menuOverlay: { position: 'fixed', inset: '0', zIndex: 40 },
   menu: {
@@ -643,6 +651,7 @@ function createApi() {
     getCumulative: () => req('/cumulative'),
     getWeekly: () => req('/weekly'),
     getDiag: () => req('/diag'),
+    setPinned: (id, pinned) => req('/note/pin', { id, pinned }),
     getBriefs: () => req('/briefs'),
     getBrief: (date) => req(`/brief?date=${encodeURIComponent(date)}`),
     exportNote: async (id) => {
@@ -1286,6 +1295,62 @@ function makeMenuItem(React) {
   };
 }
 
+/** 归档页：完成超过一周的卡集中在这里，按月份分组，可钉回画布。 */
+function makeArchivePage(React) {
+  const h = React.createElement;
+
+  function row(n, busy, onPin, onOpenSession) {
+    const when = fmtTime(Number(n.doneAt ?? n.updatedAt) || 0);
+    const openable = Boolean(n.source?.id);
+    const title = h('button', {
+      type: 'button',
+      style: { ...S.briefItemLink, fontSize: '12px', fontWeight: 400, flex: '1', minWidth: 0 },
+      title: openable ? '打开对应线程' : '',
+      onClick: () => { if (openable) onOpenSession?.(n.source.id); },
+    }, n.text);
+    const pin = h('button', {
+      type: 'button',
+      disabled: busy === n.id,
+      style: S.archivePin,
+      title: '钉回画布，不再自动归档',
+      onClick: () => onPin?.(n.id),
+    }, '钉回');
+    return h('div', { key: n.id, style: S.archiveRow }, h('span', { style: S.doneWhen }, when), title, pin);
+  }
+
+  return function ArchivePage({ items, onPin, onOpenSession, busy }) {
+    const list = (items ?? []).slice().sort((a, b) => (Number(b.doneAt ?? b.updatedAt) || 0) - (Number(a.doneAt ?? a.updatedAt) || 0));
+
+    if (!list.length) {
+      return h('div', { style: S.pageEmpty },
+        h('div', { style: S.pageKicker }, '归档'),
+        h('div', { style: { fontSize: '15px', fontWeight: 600 } }, '还没有该归档的卡片'),
+        h('div', { style: { fontSize: '12px', color: TEXT_2, marginTop: '4px' } }, '完成超过 7 天的卡会自动收进这里。'));
+    }
+
+    const groups = new Map();
+    for (const n of list) {
+      const at = Number(n.doneAt ?? n.updatedAt) || Date.now();
+      const key = new Date(at).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' });
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(n);
+    }
+
+    const header = h('div', { style: S.weekHead },
+      h('div', null,
+        h('div', { style: S.pageKicker }, '归档'),
+        h('div', { style: S.weekTitle }, `${list.length} 张已归档`)),
+      h('span', { style: S.spacer }),
+      h('span', { style: S.weekRange }, '完成超过 7 天自动归档'));
+
+    const sections = [...groups.entries()].map(([month, rows]) => h('div', { key: month, style: S.chartCard },
+      h('div', { style: S.chartTitle }, month),
+      h('div', { style: S.doneList }, rows.map((n) => row(n, busy, onPin, onOpenSession)))));
+
+    return h('div', { style: S.weekScroll }, h('div', { style: S.weekInner }, header, ...sections));
+  };
+}
+
 function makeWorkspace(React, openSession, ctxRef) {
   const h = React.createElement;
   const menuItem = makeMenuItem(React);
@@ -1293,6 +1358,7 @@ function makeWorkspace(React, openSession, ctxRef) {
   const Note = makeNote(React, api, (data) => boardSink.fn?.(data));
   const BriefPage = makeBriefPage(React);
   const WeekPage = makeWeekPage(React);
+  const ArchivePage = makeArchivePage(React);
 
   return function Workspace() {
     /** 看板对象 { version, notes }；null = 还没加载回来。 */
@@ -1324,6 +1390,8 @@ function makeWorkspace(React, openSession, ctxRef) {
     const [unlisted, setUnlisted] = React.useState(null);
     /** 左侧固定的「菜单」：功能开关都收在这里，顶栏不再堆按钮。 */
     const [menuOpen, setMenuOpen] = React.useState(false);
+    /** 钉住/取消钉住中的卡 id（避免连点）。 */
+    const [pinning, setPinning] = React.useState(null);
     /** 诊断抽屉：能力面 + 数据规模 + 最近一次跳转结果。 */
     const [showDiag, setShowDiag] = React.useState(false);
     const [diag, setDiag] = React.useState(null);
@@ -1405,7 +1473,8 @@ function makeWorkspace(React, openSession, ctxRef) {
       const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (cb) => setTimeout(cb, 16);
       raf(() => {
         if (!anyOverlap()) return;
-        const tasks = notes.filter((n) => n.kind !== 'brief');
+        // 归档的卡不上画布（完成/放弃超过 7 天）；它们进「归档」页
+        const tasks = notes.filter((n) => n.kind !== 'brief' && !n.archived);
         if (!tasks.length) return;
         const { positions, height } = packLayout(readingOrder(tasks));
         setLayoutH(height);
@@ -1684,6 +1753,20 @@ function makeWorkspace(React, openSession, ctxRef) {
       }
     };
 
+    /** 钉回画布（钉住的完成卡不再自动归档）。 */
+    const pinCard = async (id) => {
+      setPinning(id);
+      try {
+        const data = await api.setPinned(id, true);
+        if (data?.board) onBoard(data);
+        setToast('已钉回画布');
+      } catch (e) {
+        setError(`钉住失败：${e.message}`);
+      } finally {
+        setPinning(null);
+      }
+    };
+
     /** 打开诊断时现取一份宿主事实。 */
     const loadDiag = React.useCallback(async () => {
       try {
@@ -1914,14 +1997,16 @@ function makeWorkspace(React, openSession, ctxRef) {
       return cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom;
     };
 
-    // 简报卡不算待办；已放弃的不算「没做完」
-    const tasks = notes.filter((n) => n.kind !== 'brief' && !n.cancelled);
+    // 简报卡不算待办；已放弃的不算「没做完」；归档的不上画布
+    const archived = notes.filter((n) => n.kind !== 'brief' && n.archived);
+    const tasks = notes.filter((n) => n.kind !== 'brief' && !n.cancelled && !n.archived);
     const cancelledCount = notes.filter((n) => n.kind !== 'brief' && n.cancelled).length;
     const reviewCount = notes.filter((n) => n.kind !== 'brief' && n.review && !n.done && !n.cancelled).length;
     // 简报不在画布上了（单独一页），这里只放便签
     const shown = notes.filter((n) => {
       if (n.kind === 'brief') return false;
-      if (n.cancelled) return true; // 放弃的仍然看得见，可随时恢复
+      if (n.archived) return false;            // 归档的不上画布
+      if (n.cancelled) return true;            // 放弃的仍然看得见，可随时恢复
       return hideDone ? !n.done : true;
     });
     // 看板上保存的那份简报（画布不再渲染它）：有多张时取日期最新的
@@ -1958,7 +2043,12 @@ function makeWorkspace(React, openSession, ctxRef) {
             type: 'button',
             style: { ...S.tab, ...(tab === 'brief' ? S.tabActive : {}) },
             onClick: () => setTab('brief'),
-          }, '简报')),
+          }, '简报'),
+          h('button', {
+            type: 'button',
+            style: { ...S.tab, ...(tab === 'archived' ? S.tabActive : {}) },
+            onClick: () => setTab('archived'),
+          }, archived.length ? `归档 ${archived.length}` : '归档')),
 
         /* 中间：只留当前页真正需要看的状态 */
         tab === 'notes' && open
@@ -1990,6 +2080,14 @@ function makeWorkspace(React, openSession, ctxRef) {
 
 
 
+      tab === 'archived'
+        ? h(ArchivePage, {
+          items: archived,
+          busy: pinning,
+          onPin: pinCard,
+          onOpenSession: (id) => { void openSession?.(id); },
+        })
+        : null,
       tab === 'week'
         ? h(WeekPage, {
           data: weekly,

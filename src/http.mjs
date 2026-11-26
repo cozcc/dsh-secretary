@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { stats, importSessions, applyPositions, findNote, noteToMarkdown, removeNotesBySources } from './board.mjs';
+import { stats, importSessions, applyPositions, findNote, noteToMarkdown, removeNotesBySources, isArchived, setPinned } from './board.mjs';
 import { scanSessions } from './sessions.mjs';
 import { readSettings, writeSettings } from './settings.mjs';
 import { runBrief } from './briefing.mjs';
@@ -76,7 +76,13 @@ async function readJsonBody(req) {
 
 /** 统一的响应格式：{ board, stats }，前端整块替换本地状态。 */
 function payload(board) {
-  return { board, stats: stats(board) };
+  const now = Date.now();
+  const notes = board.notes.map((n) => ({ ...n, archived: isArchived(n, now) }));
+  return {
+    board: { ...board, notes },
+    stats: { ...stats(board), archived: notes.filter((n) => n.archived).length },
+    now,
+  };
 }
 
 export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
@@ -432,6 +438,17 @@ export function registerHttpRoutes(ctx, { store, log, scanOptions }) {
               const { board } = await store.setDone(body.id, body.done !== false);
               return json(res, 200, payload(board));
             }
+            if (route === '/note/pin' && method === 'POST') {
+              const body = await readJsonBody(req);
+              const { board } = await store.mutate((b) => setPinned(b, String(body.id ?? ''), body.pinned !== false));
+              const data = payload(board);
+              const note = findNote(board, body.id);
+              return json(res, 200, {
+                ...data,
+                note: note ? { ...note, archived: isArchived(note) } : null,
+              });
+            }
+
             if (route === '/note/delete' && method === 'POST') {
               const body = await readJsonBody(req);
               if (!body.id) return json(res, 400, { error: 'id 必填' });

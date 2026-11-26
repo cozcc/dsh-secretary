@@ -78,6 +78,7 @@ export function normalizeBoard(raw) {
       source: null,
       kind: n.kind === 'brief' ? 'brief' : 'note',
       cancelled: n.cancelled === true,
+      pinned: n.pinned === true,
       stages: Array.isArray(n.stages)
         ? n.stages.filter((st) => st && Array.isArray(st.items) && st.items.length).slice(-20).map((st) => ({
           at: Number(st.at) || 0,
@@ -552,6 +553,29 @@ export function sanitizeTitle(raw, max = 28) {
   const cut = head.lastIndexOf(' ');
   const clipped = cut > max * 0.6 ? head.slice(0, cut) : head;
   return `${clipped.trimEnd()}…`;
+}
+
+/** 完成多久之后自动进归档（天）。画布只留在办 + 最近完成的，历史进归档页。 */
+export const ARCHIVE_AFTER_DAYS = 7;
+
+/** 归档判定：已完成/已放弃，且结束时间早于 cutoff，且没有被钉住。 */
+export function isArchived(note, now = Date.now(), days = ARCHIVE_AFTER_DAYS) {
+  if (note?.kind === 'brief') return false;
+  if (!note?.done && !note?.cancelled) return false;
+  if (note.pinned) return false;
+  const endedAt = Number(note.doneAt) || Number(note.updatedAt) || 0;
+  if (!endedAt) return false;
+  return endedAt < now - days * 86_400_000;
+}
+
+/** 钉住/取消钉住（钉住的完成卡留在画布上）。 */
+export function setPinned(board, id, pinned, now = Date.now()) {
+  const note = board.notes.find((n) => n.id === id);
+  if (!note) throw new Error(`便签不存在：${id}`);
+  note.pinned = Boolean(pinned);
+  note.updatedAt = now;
+  pushHistory(note, 'pin', pinned ? '钉在画布上' : '取消钉住', now);
+  return note;
 }
 
 /** 时间戳 → 2026-11-16 14:20 */
