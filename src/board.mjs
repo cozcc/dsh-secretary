@@ -325,7 +325,9 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
     const todos = (Array.isArray(snap.todos) ? snap.todos : []).slice(0, 50);
     if (!todos.length) continue;
 
-    const title = String(snap.title ?? '').slice(0, 200) || `会话 ${sessionId.slice(0, 8)}`;
+    // 标题洗短：原始标题留在 source.titleRaw，卡片上只放能读的那一段
+    const titleRaw = String(snap.title ?? '').slice(0, 400);
+    const title = sanitizeTitle(titleRaw || `会话 ${sessionId.slice(0, 8)}`);
     const allDone = todos.every((t) => t.status === 'completed');
     const existing = board.notes.find((n) => n.source?.kind === 'session' && n.source.id === sessionId);
 
@@ -351,6 +353,7 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
           kind: 'session',
           id: sessionId,
           title,
+          titleRaw,
           workspace: String(snap.workspace ?? '').slice(0, 200),
           updatedAt: Number(snap.updatedAt) || 0,
           syncedAt: now,
@@ -406,6 +409,7 @@ export function importSessions(board, snapshots, now = Date.now(), colorSeed = 0
       kind: 'session',
       id: sessionId,
       title,
+      titleRaw,
       workspace: String(snap.workspace ?? existing.source?.workspace ?? '').slice(0, 200),
       updatedAt: Number(snap.updatedAt) || 0,
       syncedAt: now,
@@ -518,6 +522,34 @@ export function removeNotesBySources(board, sessionIds) {
     return true;
   });
   return removed;
+}
+
+/**
+ * 把会话标题洗成人能读的短标题。
+ *
+ * 拉进来的标题常常是「原始提示词的第一行」：带 `#`、`**`、`会话标题：` 前缀、
+ * URL、很长的英文句子。卡片上只有一个标题位，所以这里统一洗一遍：
+ * 去标记 → 去前缀 → 去 URL → 压空白 → 截断到 28 字。
+ */
+export function sanitizeTitle(raw, max = 28) {
+  let t = String(raw ?? '');
+  if (!t.trim()) return '未命名线程';
+  // URL → 去掉（标题里放链接没有阅读价值）
+  t = t.replace(/https?:\/\/\S+/g, ' ');
+  // markdown 标记与前缀标签
+  t = t.replace(/[*_`>#~]/g, ' ');
+  t = t.replace(/^\s*(会话标题|标题|任务|需求|Task|Title)\s*[:：]\s*/i, '');
+  // 压空白
+  t = t.replace(/\s+/g, ' ').trim();
+  // 去掉首尾的标点
+  t = t.replace(/^[\s·—\-–:：,，.。;；|/]+/, '').replace(/[\s·—\-–:：,，;；|/]+$/, '').trim();
+  if (!t) return '未命名线程';
+  if (t.length <= max) return t;
+  // 截断：优先在空格处断，中英混排也能看
+  const head = t.slice(0, max);
+  const cut = head.lastIndexOf(' ');
+  const clipped = cut > max * 0.6 ? head.slice(0, cut) : head;
+  return `${clipped.trimEnd()}…`;
 }
 
 /** 时间戳 → 2026-11-16 14:20 */

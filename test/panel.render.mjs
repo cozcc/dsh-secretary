@@ -215,7 +215,11 @@ const byText = (t) => btns().find((b) => b.textContent.includes(t));
 let pass = 0; let fail = 0;
 const check = (name, cond, extra = '') => { if (cond) { pass++; console.log('✔', name); } else { fail++; console.log('✖', name, extra); } };
 
-check('首屏渲染出两张便签', text().includes('写周报') && text().includes('回邮件'));
+// 默认「只看没做完」= 开：首屏只应看到未完成的那张
+check('首屏默认只显示未完成的便签', text().includes('写周报') && !text().includes('回邮件'),
+  `写周报=${text().includes('写周报')} 回邮件=${text().includes('回邮件')}`);
+check('顶栏计数仍然包含已完成', /便签 2/.test(text()), text().slice(0, 80));
+
 check('统计正确（便签 2 / 1 未完成）', text().includes('便签 2') && text().includes('1 未完成'), text().slice(0, 120));
 
 // 勾完成
@@ -234,10 +238,15 @@ const clickMenuItem = async (label) => {
   const item = [...host.querySelectorAll('button')].find((b) => (b.textContent || '').startsWith(label));
   await act(async () => { item.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
 };
+// 默认是「只看没做完」，先关掉，两张都该出现
+await clickMenuItem('☑ 只看没做完');
+check('关闭筛选后两张都出现', text().includes('写周报') && text().includes('回邮件'), text().slice(0, 120));
+
+// 再打开：两张都已完成 → 提示"没有没做完的了"
 await clickMenuItem('☑ 只看没做完');
 check('筛选后两张都收起，提示没有没做完的', text().includes('没有没做完的了'), text().slice(0, 160));
 
-// 取消筛选
+// 再关掉，恢复显示
 await clickMenuItem('☑ 只看没做完');
 check('再点恢复显示', text().includes('写周报') && text().includes('回邮件'));
 
@@ -404,9 +413,17 @@ notes.push({
 });
 await clickMenuItem('▦ 自动排列');
 await act(async () => { await new Promise((r) => setTimeout(r, 200)); });
-check('会话卡片渲染出待办清单', text().includes('加自动排列') && text().includes('加会话导入') && text().includes('补测试'));
+check('会话卡片只铺开未完成的待办', text().includes('加会话导入') && text().includes('补测试') && !text().includes('加自动排列'),
+  text().slice(-200));
+check('未完成/已完成用一行摘要收口', /已完成 1/.test(text()) && /展开/.test(text()), text().slice(-160));
 check('会话卡片显示来源', text().includes('Playground'), text().slice(-200));
-check('清单状态标记（✓/◐/○）', host.textContent.includes('✓') && host.textContent.includes('◐') && host.textContent.includes('○'));
+check('清单状态标记（◐/○）', host.textContent.includes('◐') && host.textContent.includes('○'));
+// 点摘要展开，才看到已完成的 ✓
+const summaryBtn = host.querySelector('div[data-todo-summary]');
+if (summaryBtn) {
+  await act(async () => { summaryBtn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((r) => setTimeout(r, 80)); });
+}
+check('展开后出现已完成项（✓）', host.textContent.includes('加自动排列') && host.textContent.includes('✓'), text().slice(-160));
 
 
 // ── 助理简报：生成按钮、简报卡渲染、设置面板 ──────────────
@@ -465,10 +482,10 @@ check('排版走批量接口（一次请求）', calls.some((c) => c.startsWith(
 
 const html = host.innerHTML;
 check('卡片没有内部滚动条', !html.includes('max-height') && !html.includes('overflow-y'), html.match(/max-height[^;]*/)?.[0] ?? '');
-const todoCard = [...host.querySelectorAll('div[data-note-id]')].find((el) => el.textContent.includes('加自动排列'));
+const todoCard = [...host.querySelectorAll('div[data-note-id]')].find((el) => el.textContent.includes('工作台插件（来自会话）'));
 if (todoCard) {
   const text = todoCard.innerHTML;
-  const iTodo = text.indexOf('加自动排列');
+  const iTodo = text.indexOf('补测试');
   const iUpdates = text.indexOf('记进展');
   check('待办清单在正文之后、进展之前', iTodo > 0 && (iUpdates === -1 || iTodo < iUpdates));
 } else check('找到会话卡片', false);

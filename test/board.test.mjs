@@ -11,6 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import {
+  sanitizeTitle,
   applyPositions,
   removeNotesBySources,
   importSessions,
@@ -338,4 +339,19 @@ test('同一线程的连续任务：阶段全部保留，标题跟随但不动�
     todos: [{ content: '任务B-1', status: 'pending' }], stages: stage2,
   }], 5000);
   assert.equal(board.notes[0].text, '我自己起的名', '手改的标题不被覆盖');
+});
+
+
+test('标题清洗：去 markdown、去前缀、去 URL、截断', () => {
+  const messy = sanitizeTitle('**会话标题：** 执行 OXO_DEEPINFER_EFFECT 任务文件并提交');
+  assert.ok(!messy.includes('**') && !messy.includes('会话标题'), `markdown 与前缀要清掉：${messy}`);
+  assert.ok(messy.startsWith('执行 OXO'), `要从正文开始：${messy}`);
+  assert.ok(messy.endsWith('…'), `过长要截断：${messy}`);
+  assert.equal(sanitizeTitle('# 任务：补齐下游交付所需的能力'), '补齐下游交付所需的能力');
+  assert.equal(sanitizeTitle('看这个 https://example.com/x?y=1 链接'), '看这个 链接');
+  assert.equal(sanitizeTitle('  '), '未命名线程');
+  assert.ok(sanitizeTitle('A'.repeat(80)).length <= 29, '要截断');
+  assert.ok(sanitizeTitle('Offline local LaunchAgent deployment preparation').endsWith('…'), '长英文要截断并加省略号');
+  // 短标题原样保留
+  assert.equal(sanitizeTitle('检查DSH闪退原因'), '检查DSH闪退原因');
 });

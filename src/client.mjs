@@ -252,6 +252,10 @@ const S = {
   },
   todoRow: { display: 'flex', gap: '6px', alignItems: 'flex-start', fontSize: '11.5px', lineHeight: '16px', color: TEXT_2 },
   todoMark: { flex: 'none', width: '11px', textAlign: 'center', fontVariantNumeric: 'tabular-nums' },
+  todoSummary: {
+    marginTop: '3px', fontSize: '10.5px', color: TEXT_2, cursor: 'pointer',
+    padding: '2px 0 0 16px', userSelect: 'none',
+  },
   todoDone: { textDecoration: 'line-through', opacity: 0.55 },
   todoLink: {
     flex: '1', minWidth: 0, textAlign: 'left', padding: 0, margin: 0,
@@ -761,6 +765,8 @@ function makeNote(React, api, onBoard) {
     const [busy, setBusy] = React.useState(false);
     const [hover, setHover] = React.useState(false);
     const [showHistory, setShowHistory] = React.useState(false);
+    /** 待办默认只铺开未完成的 3 条，点「展开」才看全部。 */
+    const [showAllTodos, setShowAllTodos] = React.useState(false);
 
     const run = React.useCallback(async (fn) => {
       setBusy(true);
@@ -886,30 +892,49 @@ function makeNote(React, api, onBoard) {
         }, note.text)),
 
     (note.todos ?? []).length
-      ? h('div', { style: S.todos },
-        note.todos.slice(0, 4).map((t, i) => {
-          const openable = Boolean(note.source?.id) && t.status !== 'completed';
-          const done = t.status === 'completed';
-          const label = h('span', {
-            style: {
-              flex: '1', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              ...(done ? S.todoDone : {}),
-              ...(t.status === 'in_progress' ? S.todoDoing : {}),
-            },
-          }, t.content);
-          return h('div', { key: `${note.id}-t${i}`, style: S.todoRow },
-            h('span', { style: S.todoMark }, done ? '✓' : t.status === 'in_progress' ? '◐' : '○'),
-            openable
-              ? h('button', {
-                type: 'button',
-                style: S.todoLink,
-                title: `打开对应线程：${note.source?.title ?? ''}`,
-                onPointerDown: (e) => e.stopPropagation(),
-                onClick: (e) => { e.stopPropagation(); onOpenSession?.(note.source.id); },
-              }, label)
-              : label);
-        }),
-        note.todos.length > 4 ? h('div', { style: { ...S.todoRow, opacity: 0.7 } }, h('span', { style: S.todoMark }), h('span', null, `还有 ${note.todos.length - 4} 条…`)) : null)
+      ? (() => {
+        const allTodos = note.todos ?? [];
+        const openTodos = allTodos.filter((t) => t.status !== 'completed');
+        const shownTodos = showAllTodos ? allTodos : openTodos.slice(0, 3);
+        const doneCount = allTodos.length - openTodos.length;
+        const rest = Math.max(0, openTodos.length - shownTodos.length);
+        return h('div', { style: S.todos },
+          shownTodos.map((t, i) => {
+            const openable = Boolean(note.source?.id) && t.status !== 'completed';
+            const done = t.status === 'completed';
+            const label = h('span', {
+              style: {
+                flex: '1', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                ...(done ? S.todoDone : {}),
+                ...(t.status === 'in_progress' ? S.todoDoing : {}),
+              },
+            }, t.content);
+            return h('div', { key: `${note.id}-t${i}`, style: S.todoRow },
+              h('span', { style: S.todoMark }, done ? '✓' : t.status === 'in_progress' ? '◐' : '○'),
+              openable
+                ? h('button', {
+                  type: 'button',
+                  style: S.todoLink,
+                  title: `打开对应线程：${note.source?.title ?? ''}`,
+                  onPointerDown: (e) => e.stopPropagation(),
+                  onClick: (e) => { e.stopPropagation(); onOpenSession?.(note.source.id); },
+                }, label)
+                : label);
+          }),
+          (rest > 0 || doneCount > 0)
+            ? h('div', {
+              'data-todo-summary': '1',
+              style: S.todoSummary,
+              title: showAllTodos ? '收起已完成的条目' : '展开全部待办（含已完成）',
+              onPointerDown: (e) => e.stopPropagation(),
+              onClick: (e) => { e.stopPropagation(); setShowAllTodos((v) => !v); },
+            }, [
+              rest > 0 ? `还有 ${rest} 项没做` : '',
+              doneCount > 0 ? `已完成 ${doneCount}` : '',
+              showAllTodos ? '收起 ▴' : '展开 ▾',
+            ].filter(Boolean).join(' · '))
+            : null);
+      })()
       : null,
 
     note.updates.length
@@ -1279,8 +1304,8 @@ function makeWorkspace(React, openSession, ctxRef) {
     const [dragActive, setDragActive] = React.useState(false);
     /** 刚新建的便签 id：让那张卡自动进编辑态。 */
     const [autoEditId, setAutoEditId] = React.useState(null);
-    /** 只看没做完：勾掉的那些先收起来，但仍然计数。 */
-    const [hideDone, setHideDone] = React.useState(false);
+    /** 只看没做完：默认开——画布第一眼只该看见"还没做的事"，勾完的收起来但仍计数。 */
+    const [hideDone, setHideDone] = React.useState(true);
     /** 排布算出来的画布高度（卡片高度不一，靠它撑开）。 */
     const [layoutH, setLayoutH] = React.useState(0);
     /** 自动排列进行中（写回期间禁掉按钮，避免连点）。 */
